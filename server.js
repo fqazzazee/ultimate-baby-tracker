@@ -12,6 +12,7 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as store from './lib/store.js';
@@ -41,6 +42,8 @@ const APP = {
 const PORT = Number(process.env.BT_PORT || 8477);
 const HOST = process.env.BT_HOST || '0.0.0.0';
 const MAX_BODY = 1_000_000;
+/** A restore carries the whole journal, so it gets its own, larger ceiling. */
+const MAX_UPLOAD = 50_000_000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -86,6 +89,25 @@ function readBody(req) {
         reject(new Error('invalid JSON body'));
       }
     });
+    req.on('error', reject);
+  });
+}
+
+/** The raw bytes of a request body, for uploads that are not JSON. */
+function readRawBody(req, limit = MAX_UPLOAD) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error('That file is too large to restore.'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
@@ -168,6 +190,39 @@ function exportCSV(url) {
   return toCSV(rows);
 }
 
+/* ------------------------------------------------------------ backup bundle */
+
+const BACKUP_MAGIC = [0x1f, 0x8b]; // gzip
+
+function backupFilename() {
+  const now = new Date();
+  const stamp = `${now.toISOString().slice(0, 10)}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  return `baby-tracker-backup-${stamp}.json.gz`;
+}
+
+/**
+ * Accept what the browser actually sends back: the gzipped bundle we wrote, or
+ * a plain .json one if someone unzipped it or edited it by hand.
+ */
+function parseBundle(buf) {
+  if (!buf || !buf.length) throw new Error('No file was uploaded.');
+  let text;
+  if (buf[0] === BACKUP_MAGIC[0] && buf[1] === BACKUP_MAGIC[1]) {
+    try {
+      text = zlib.gunzipSync(buf).toString('utf8');
+    } catch {
+      throw new Error('That backup file is corrupt and could not be unpacked.');
+    }
+  } else {
+    text = buf.toString('utf8');
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('That file is not a backup bundle.');
+  }
+}
+
 /* ------------------------------------------------------------------- routing */
 
 async function handleAPI(req, res, url) {
@@ -184,6 +239,26 @@ async function handleAPI(req, res, url) {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': `attachment; filename="baby-tracker-${new Date().toISOString().slice(0, 10)}.csv"`,
     });
+  }
+
+  if (resource === 'backup' && method === 'GET') {
+    const body = zlib.gzipSync(Buffer.from(`${JSON.stringify(store.exportBundle(APP), null, 2)}\n`, 'utf8'));
+    return send(res, 200, body, {
+      'content-type': 'application/gzip',
+      'content-disposition': `attachment; filename="${backupFilename()}"`,
+      'content-length': body.length,
+    });
+  }
+
+  if (resource === 'restore' && method === 'POST') {
+    const bundle = parseBundle(await readRawBody(req));
+    // ?dryRun=1 answers "what is in this file?" without touching anything.
+    if (url.searchParams.get('dryRun')) {
+      return sendJSON(res, 200, { ok: true, summary: store.inspectBundle(bundle) });
+    }
+    const summary = store.importBundle(bundle, APP);
+    console.log(`[restore] ${summary.events} events, ${summary.babies} babies (safety copy: ${summary.safetyCopy})`);
+    return sendJSON(res, 200, { ok: true, summary, rev: store.getRevision() });
   }
 
   if (resource === 'config' && method === 'PUT') {

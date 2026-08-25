@@ -31,6 +31,18 @@ export const api = {
   verifyPin: (userId, pin) => request(`/api/users/${encodeURIComponent(userId)}/verify`, { method: 'POST', body: { pin } }),
   setPin: (userId, pin, currentPin) => request(`/api/users/${encodeURIComponent(userId)}/pin`, { method: 'POST', body: { pin, currentPin } }),
 
+  /** Send the picked file straight through; `dryRun` only reports what is in it. */
+  restore: async (file, { dryRun = false } = {}) => {
+    const res = await fetch(`/api/restore${dryRun ? '?dryRun=1' : ''}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: file,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    return data;
+  },
+
   snoozeAlarm: (key, minutes) => request(`/api/alarms/${encodeURIComponent(key)}/snooze`, { method: 'POST', body: { minutes } }),
   dismissAlarm: (key, dueAt) => request(`/api/alarms/${encodeURIComponent(key)}/dismiss`, { method: 'POST', body: { dueAt } }),
   armAlarm: (key) => request(`/api/alarms/${encodeURIComponent(key)}/arm`, { method: 'POST', body: {} }),

@@ -12,7 +12,7 @@ import { $, esc, store, fmtClock, fmtSpan, babyAge, ringState } from './util.js'
 import { toneStyle, typeOf } from './ui.js';
 import { renderTrack, renderHistory, renderAlarms } from './views.js';
 import {
-  renderSetup, wireSetup, exportCSV,
+  renderSetup, wireSetup, exportCSV, downloadBackup, restoreBackup,
   openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet, unlockProfile,
 } from './settings.js';
 
@@ -273,6 +273,8 @@ const ACTIONS = {
   'filter-type': (el) => { state.historyType = el.dataset.type; render(); },
   range: async (el) => { state.historyDays = Number(el.dataset.days); await refresh(); },
   export: () => exportCSV(),
+  backup: () => downloadBackup(),
+  restore: () => restoreBackup(),
 
   'add-baby': () => openBabySheet(),
   'edit-baby': (el) => openBabySheet(el.dataset.id),

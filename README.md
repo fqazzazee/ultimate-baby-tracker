@@ -124,6 +124,12 @@ The optional 4-digit profile PINs are not a security control. They only stop
 family members from logging entries under each other's names; they do not
 protect the API, which will happily answer unauthenticated requests.
 
+That now includes `POST /api/restore`, which replaces the entire data set, and
+`GET /api/backup`, which hands out every entry and the PIN hashes with it.
+Anything that can reach the port can do both. This changes nothing about how
+the app should be deployed — it was never safe to expose — but it does raise
+the cost of getting the deployment wrong.
+
 Deploy it accordingly:
 
 - Put it **behind a reverse proxy** (nginx, Caddy, Traefik) and let the proxy
@@ -150,7 +156,36 @@ data/
 `events.log` is a journal: new entries are appended, edits and deletions are
 appended as further lines, and the file is replayed at startup. A crash can
 never corrupt earlier entries, and the log is compacted automatically once
-tombstones pile up. Back it up by copying the folder.
+tombstones pile up. Copying the folder is still the simplest backup there is.
+
+## Backup and restore
+
+**Setup → Data** has both halves:
+
+- **Download backup** writes a gzipped bundle —
+  `baby-tracker-backup-2026-08-25-1430.json.gz` — holding the config and every
+  entry, timer and alarm state. It is ordinary JSON inside, so `gunzip -c` on
+  it gives you something readable and greppable.
+- **Restore from backup** takes that file back. The server unpacks it, reports
+  what is inside (entries, babies, people, buttons, alarms) and waits for you
+  to confirm before **replacing everything currently stored**. A plain `.json`
+  file works too, if you unzipped or hand-edited one.
+
+Two things worth knowing. The bundle contains the salted PIN hashes, so keep
+the file as private as the data folder itself. And before a restore overwrites
+anything, the current state is written to `data/pre-restore-<timestamp>.json`
+in the same format — restoring the wrong file costs you a minute, not your
+history.
+
+Either half works from the command line as well:
+
+```sh
+curl -OJ http://localhost:8477/api/backup
+curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430.json.gz \
+     'http://localhost:8477/api/restore?dryRun=1'     # look inside, change nothing
+curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430.json.gz \
+     http://localhost:8477/api/restore                # actually restore
+```
 
 ## HTTP API
 
@@ -165,6 +200,8 @@ tombstones pile up. Back it up by copying the folder.
 | `POST` | `/api/alarms/:key/{snooze,dismiss,arm}` | Alarm control |
 | `POST` | `/api/users/:id/{verify,pin}` | Check a profile PIN / set or clear one |
 | `GET` | `/api/export.csv?babyId=` | Spreadsheet export |
+| `GET` | `/api/backup` | Gzipped bundle of everything |
+| `POST` | `/api/restore?dryRun=` | Restore a bundle, or just report what is in it |
 
 ## Keeping it running
 

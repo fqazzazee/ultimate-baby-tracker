@@ -3,6 +3,23 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.2.0 — 2026-08-25
+
+- **Download backup** in **Setup → Data** writes a gzipped bundle of everything
+  — config, every entry, running timers and alarm state. Plain JSON inside, so
+  `gunzip -c` gives you something readable.
+- **Restore from backup** reads one back. The server unpacks the file and
+  reports what is in it — entries, babies, people, buttons, alarms — and waits
+  for confirmation before replacing what is stored. An unzipped or hand-edited
+  `.json` bundle is accepted too.
+- Before a restore overwrites anything, the current state is written to
+  `data/pre-restore-<timestamp>.json` in the same format.
+- New endpoints: `GET /api/backup` and `POST /api/restore` (with `?dryRun=1` to
+  inspect a file without applying it). Both are unauthenticated like the rest of
+  the API, which the README's security notice now spells out.
+- The bundle carries salted PIN hashes so that a restore does not silently
+  unlock every profile. Keep the file as private as the data folder.
+
 ## 1.1.2 — 2026-08-25
 
 - Merge the baby and person selectors into a single strip that sits with the
