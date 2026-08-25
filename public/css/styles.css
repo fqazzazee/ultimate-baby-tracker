@@ -489,6 +489,16 @@ input:focus, select:focus, textarea:focus {
 .btn.wide { width: 100%; }
 .btn.sm { min-height: 42px; padding: 8px 14px; font-size: 0.85rem; border-radius: 12px; }
 
+/* A button that carries a second line explaining what it does. */
+.btn.stacked, .about-links .btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left;
+  min-height: 60px;
+  justify-content: center;
+}
+.btn.stacked .small, .about-links .btn .small { font-weight: 600; }
+.btn-stack { display: grid; gap: 8px; }
+
 /* Big nursery-style toggle switch */
 .switch { display: flex; align-items: center; gap: 12px; padding: 12px 0; min-height: var(--tap); }
 .switch .txt { flex: 1; }
@@ -619,14 +629,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .about-links { display: grid; gap: 8px; margin: 14px 0 4px; }
-.about-links .btn {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  text-align: left;
-  text-decoration: none;
-  min-height: 60px;
-  justify-content: center;
-}
-.about-links .btn .small { font-weight: 600; }
+.about-links .btn { text-decoration: none; }
 
 /* Standing warning - deliberately hard to skim past. */
 .notice {

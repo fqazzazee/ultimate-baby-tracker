@@ -915,7 +915,15 @@ export function renderSetup() {
           ${state.data?.totalEvents ?? 0} entries stored as plain text on the server
           (<code>data/events.log</code> and <code>data/config.json</code>). Everything survives a restart.
         </p>
-        <button class="btn wide" data-act="export">⬇️ Export CSV</button>
+        <div class="btn-stack">
+          <button class="btn wide stacked" data-act="export">⬇️ Export CSV<span class="small muted">Entries only, for a spreadsheet</span></button>
+          <button class="btn wide stacked" data-act="backup">🗜️ Download backup<span class="small muted">Everything, compressed, for safekeeping</span></button>
+          <button class="btn wide stacked" data-act="restore">♻️ Restore from backup<span class="small muted">Replaces everything on the server</span></button>
+        </div>
+        <p class="small muted" style="margin-bottom:0">
+          A backup holds babies, people, buttons, alarms and every entry — including
+          PIN hashes. Keep it as private as the data folder itself.
+        </p>
       </div>
 
       ${aboutCard()}
@@ -980,4 +988,90 @@ export function wireSetup(root) {
 
 export async function exportCSV() {
   window.location.href = `/api/export.csv?babyId=${encodeURIComponent(state.babyId || 'all')}`;
+}
+
+/* ------------------------------------------------------------------ backup */
+
+export function downloadBackup() {
+  window.location.href = '/api/backup';
+  toast({ icon: '🗜️', text: 'Backup downloading…', tone: 'sky' });
+}
+
+function fileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Ask for a file, look inside it on the server, then confirm before replacing. */
+export function restoreBackup() {
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = '.gz,.json,application/gzip,application/json';
+  picker.addEventListener('change', async () => {
+    const file = picker.files?.[0];
+    if (!file) return;
+    try {
+      const { summary } = await api.restore(file, { dryRun: true });
+      openRestoreSheet(file, summary);
+    } catch (err) {
+      sound.play('error');
+      toast({ icon: '⚠️', text: err.message, tone: 'peach', ms: 7000 });
+    }
+  });
+  picker.click();
+}
+
+function openRestoreSheet(file, summary) {
+  const when = summary.exportedAt
+    ? new Date(summary.exportedAt).toLocaleString()
+    : 'an unknown date';
+  const rows = [
+    ['Entries', summary.events],
+    ['Babies', summary.babies],
+    ['People', `${summary.users}${summary.pins ? ` (${summary.pins} with a PIN)` : ''}`],
+    ['Buttons', summary.eventTypes],
+    ['Alarms', summary.alarms],
+  ];
+
+  const sheet = openSheet(`
+    <h3>♻️ Restore this backup?</h3>
+    <p class="small muted" style="margin-top:0">
+      <b>${esc(file.name)}</b> · ${esc(fileSize(file.size))} · taken ${esc(when)}
+      ${summary.appVersion ? ` · app v${esc(summary.appVersion)}` : ''}
+    </p>
+    <div class="card" style="margin:0 0 12px">
+      ${rows.map(([k, v]) => `
+        <div class="row" style="justify-content:space-between">
+          <span class="small muted">${esc(k)}</span><b>${esc(String(v))}</b>
+        </div>`).join('')}
+      ${summary.skipped ? `<div class="small muted">${summary.skipped} unreadable entr${summary.skipped === 1 ? 'y' : 'ies'} will be skipped.</div>` : ''}
+    </div>
+    <div class="notice">
+      <b>This replaces everything currently on the server</b> — entries, babies,
+      people, buttons, alarms and PINs. The current data is saved to a
+      <code>pre-restore-….json</code> file in the data folder first.
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn wide" data-close>Cancel</button>
+      <button class="btn primary wide" data-restore-go>Restore</button>
+    </div>`);
+
+  sheet.querySelector('[data-restore-go]').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Restoring…';
+    try {
+      const { summary: done } = await api.restore(file);
+      closeSheet();
+      await refresh();
+      sound.play('success');
+      toast({ icon: '♻️', text: `Restored ${done.events} entries`, tone: 'mint' });
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Restore';
+      sound.play('error');
+      toast({ icon: '⚠️', text: err.message, tone: 'peach', ms: 7000 });
+    }
+  });
 }
