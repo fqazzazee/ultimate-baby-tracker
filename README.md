@@ -13,19 +13,6 @@ anything else you care to invent. Built for 3 a.m. operation with one thumb.
 - **Programmable alarms** — "tell me if she hasn't fed in 3 hours".
 - **Light and dark nursery themes**, big buttons, sound and vibration feedback.
 
-Deploy it accordingly:
-
-- Put it **behind a reverse proxy** (nginx, Caddy, Traefik) and let the proxy
-  terminate TLS and handle any authentication you need — basic auth, an
-  identity-aware proxy, mTLS, a VPN, whatever suits you.
-- Apply **proper network segmentation**: bind it to a trusted VLAN or a
-  WireGuard/Tailscale interface, and use firewall rules so only the proxy can
-  reach the app port. Setting `BT_HOST=127.0.0.1` keeps it off the network
-  entirely when a proxy is running on the same host.
-- **Never expose it directly to the internet**, and don't port-forward to it.
-
-It is a family notebook on a trusted LAN. Treat it as one.
-
 ## Run it
 
 ```bash
@@ -48,8 +35,8 @@ BT_PORT=3000 BT_DATA_DIR=/srv/baby node server.js
 Open `http://<your-computer's-IP>:8477` on a phone and add it to the home
 screen — it installs as a standalone app.
 
-> No authentication, no encryption — see the [security notice](#security-notice)
-> above. Put it behind a reverse proxy on a segmented network.
+> No authentication, no encryption — see the [security notice](#security-notice).
+> Put it behind a reverse proxy on a segmented network.
 
 ## Using it
 
@@ -135,6 +122,19 @@ as plain text.
 The optional 4-digit profile PINs are not a security control. They only stop
 family members from logging entries under each other's names; they do not
 protect the API, which will happily answer unauthenticated requests.
+
+Deploy it accordingly:
+
+- Put it **behind a reverse proxy** (nginx, Caddy, Traefik) and let the proxy
+  terminate TLS and handle any authentication you need — basic auth, an
+  identity-aware proxy, mTLS, a VPN, whatever suits you.
+- Apply **proper network segmentation**: bind it to a trusted VLAN or a
+  WireGuard/Tailscale interface, and use firewall rules so only the proxy can
+  reach the app port. Setting `BT_HOST=127.0.0.1` keeps it off the network
+  entirely when a proxy is running on the same host.
+- **Never expose it directly to the internet**, and don't port-forward to it.
+
+It is a family notebook on a trusted LAN. Treat it as one.
 
 ## Where the data lives
 
