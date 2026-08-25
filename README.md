@@ -8,7 +8,8 @@ anything else you care to invent. Built for 3 a.m. operation with one thumb.
 - **Plain-text storage.** Everything lives in `data/` as JSON you can read,
   edit and back up. It survives restarts and reboots.
 - **Multiple babies**, each with its own profile, colour and age.
-- **Multiple people** — every entry records who did it ("Mom fed 60 cc at 2:04 PM").
+- **Multiple people** — every entry records who did it ("Mom fed 60 cc at 2:04 PM"),
+  each with an optional 4-digit profile PIN.
 - **Programmable alarms** — "tell me if she hasn't fed in 3 hours".
 - **Light and dark nursery themes**, big buttons, sound and vibration feedback.
 
@@ -39,16 +40,20 @@ screen — it installs as a standalone app.
 
 ## Using it
 
+The four screens — Track, History, Alarms and Setup — are pinned to the top of
+the page, so nothing important sits under your thumb while you tap.
+
 **Track** — the main screen. Every card is one kind of event, and every button
 on it logs immediately: tap **Poop** and the time is saved, with a chime, a
 stamp on screen and a buzz. A toast offers **Undo** and **Details** for a few
 seconds afterwards, so a mis-tap costs nothing.
 
 - Pick the baby (top strip) and who you are ("Logging as") once; both stick.
+  Adding a baby lives in **Setup**, out of the way of accidental taps.
 - **Breastfeed** and **Sleep** are timers: first tap starts, second tap stops
   and saves the duration. A running timer survives a server restart.
-- The **⋯** button on any card opens the full form — amount, side, poop colour,
-  a different time, a note.
+- The **⋯** button on any card opens the full form — amount, side, a different
+  time, a note.
 
 **History** — everything logged, grouped by day, filterable by type, with daily
 totals. Tap any entry to edit or delete it. Exports to CSV.
@@ -56,6 +61,20 @@ totals. Tap any entry to edit or delete it. Exports to CSV.
 **Alarms** — see below.
 
 **Setup** — babies, people, buttons, theme and sound.
+
+## Profile locks
+
+Any person can set a 4-digit PIN in **Setup → People → Edit**. Once set, the PIN
+is asked for before you can switch to that person, edit their profile, or start
+the app as them — so entries don't get logged under the wrong name. An unlock
+lasts until the browser tab is closed, and the 🔒 chip beside the people row
+re-locks immediately.
+
+PINs are stored as salted scrypt hashes and are never sent to the browser; the
+server only answers "yes" or "no", and five wrong guesses trigger a 30-second
+lockout. That said, a four-digit code is a courtesy lock between people who
+already trust each other — the API itself is still unauthenticated, so keep the
+app on a network you trust.
 
 ## Alarms
 
@@ -80,8 +99,8 @@ second, so an alarm rings on time rather than at the next poll.
 Setup → Buttons → **New button** builds a tracked event from scratch:
 
 - **Fields** to record — number (with a unit like `cc` or `°C`), text, choice,
-  yes/no, colour swatches, or duration. A field can be conditional on another
-  (poop colour only appears when "Poop" is ticked).
+  yes/no, colour swatches, or duration. A field can be conditional on another,
+  so it only appears once a related yes/no field is ticked.
 - **Buttons on the card** — each one is a preset that fills in some fields, so a
   single tap can mean "60 cc of formula" or "wet only". Leave a field blank to
   be asked later.
@@ -116,6 +135,7 @@ tombstones pile up. Back it up by copying the folder.
 | `PUT` | `/api/config` | Replace the whole config |
 | `POST` | `/api/timers`, `/api/timers/:id/stop` | Start / stop a timer |
 | `POST` | `/api/alarms/:key/{snooze,dismiss,arm}` | Alarm control |
+| `POST` | `/api/users/:id/{verify,pin}` | Check a profile PIN / set or clear one |
 | `GET` | `/api/export.csv?babyId=` | Spreadsheet export |
 
 ## Keeping it running
@@ -135,9 +155,3 @@ User=baby
 [Install]
 WantedBy=multi-user.target
 ```
-
-## A note on poop colours
-
-The colour swatches flag red, white/clay and (after the first few days) black
-stool with a reminder to call your pediatrician. That's a prompt to ask a
-professional, not medical advice — this app is a notebook, nothing more.

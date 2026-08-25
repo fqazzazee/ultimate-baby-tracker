@@ -104,7 +104,7 @@ function handleStream(req, res) {
 /* ---------------------------------------------------------------- state view */
 
 function buildState(url) {
-  const config = store.getConfig();
+  const config = store.publicConfig();
   const babyId = url.searchParams.get('babyId') || 'all';
   const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 7));
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
@@ -170,7 +170,7 @@ async function handleAPI(req, res, url) {
     const body = await readBody(req);
     if (!body || typeof body !== 'object') return sendJSON(res, 400, { error: 'config object required' });
     store.saveConfig(body);
-    return sendJSON(res, 200, { ok: true, config: store.getConfig(), rev: store.getRevision() });
+    return sendJSON(res, 200, { ok: true, config: store.publicConfig(), rev: store.getRevision() });
   }
 
   if (resource === 'events') {
@@ -222,6 +222,29 @@ async function handleAPI(req, res, url) {
       return store.cancelTimer(id)
         ? sendJSON(res, 200, { ok: true, rev: store.getRevision() })
         : sendJSON(res, 404, { error: 'no such timer' });
+    }
+  }
+
+  if (resource === 'users' && method === 'POST' && id) {
+    const body = await readBody(req);
+    const userId = decodeURIComponent(id);
+
+    if (action === 'verify') {
+      return sendJSON(res, 200, store.verifyPin(userId, body.pin));
+    }
+
+    if (action === 'pin') {
+      // Changing or clearing an existing PIN requires the current one.
+      if (store.hasPin(userId)) {
+        const check = store.verifyPin(userId, body.currentPin);
+        if (!check.ok) return sendJSON(res, 403, { error: 'Wrong current PIN', ...check });
+      }
+      const pin = body.pin === null || body.pin === '' ? null : String(body.pin);
+      if (pin !== null && !/^\d{4}$/.test(pin)) {
+        return sendJSON(res, 400, { error: 'PIN must be exactly 4 digits' });
+      }
+      if (!store.setPin(userId, pin)) return sendJSON(res, 404, { error: 'no such person' });
+      return sendJSON(res, 200, { ok: true, hasPin: pin !== null, rev: store.getRevision() });
     }
   }
 

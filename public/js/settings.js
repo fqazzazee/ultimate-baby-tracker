@@ -2,6 +2,7 @@
 
 import {
   state, config, settings, saveConfig, openSheet, closeSheet, toast, refresh, render,
+  markUnlocked, lockProfile,
 } from './core.js';
 import { api } from './api.js';
 import * as sound from './sound.js';
@@ -152,6 +153,191 @@ export function openBabySheet(babyId = null) {
   });
 }
 
+/* --------------------------------------------------------------- PIN entry */
+
+/**
+ * A numeric keypad sheet. `onComplete(pin, ctl)` fires as soon as four digits
+ * are in; `ctl.error()` shakes and clears, `ctl.reset()` just clears.
+ */
+export function openPinPad({ title, subtitle = '', onComplete, onCancel }) {
+  let digits = '';
+
+  const sheet = openSheet(`
+    <h3 style="text-align:center">${esc(title)}</h3>
+    <p class="small muted center" data-pin-sub style="margin:0 0 14px">${esc(subtitle)}</p>
+    <div class="pin-dots" data-dots>
+      ${[0, 1, 2, 3].map(() => '<span class="pin-dot"></span>').join('')}
+    </div>
+    <div class="keypad">
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" class="key" data-key="${n}">${n}</button>`).join('')}
+      <button type="button" class="key ghost" data-key="cancel">Cancel</button>
+      <button type="button" class="key" data-key="0">0</button>
+      <button type="button" class="key ghost" data-key="del">⌫</button>
+    </div>
+  `, (el) => {
+    const dots = el.querySelector('[data-dots]');
+    const sub = el.querySelector('[data-pin-sub]');
+
+    const paint = () => {
+      [...dots.children].forEach((d, i) => d.classList.toggle('on', i < digits.length));
+    };
+
+    const ctl = {
+      reset() { digits = ''; paint(); },
+      error(msg) {
+        digits = '';
+        paint();
+        dots.classList.remove('shake');
+        void dots.offsetWidth;      // restart the animation
+        dots.classList.add('shake');
+        sub.textContent = msg;
+        sub.classList.add('pin-error');
+        sound.play('error');
+      },
+      setSubtitle(msg) {
+        sub.textContent = msg;
+        sub.classList.remove('pin-error');
+      },
+      close: closeSheet,
+    };
+
+    el.addEventListener('click', (ev) => {
+      const key = ev.target.closest('[data-key]');
+      if (!key) return;
+      const val = key.dataset.key;
+      if (val === 'cancel') { closeSheet(); onCancel?.(); return; }
+      if (val === 'del') { digits = digits.slice(0, -1); paint(); return; }
+      if (digits.length >= 4) return;
+      digits += val;
+      sound.play('pop');
+      paint();
+      if (digits.length === 4) setTimeout(() => onComplete(digits, ctl), 120);
+    });
+
+    // Physical keyboards work too.
+    const onKey = (ev) => {
+      if (/^[0-9]$/.test(ev.key) && digits.length < 4) {
+        digits += ev.key;
+        paint();
+        if (digits.length === 4) setTimeout(() => onComplete(digits, ctl), 120);
+      } else if (ev.key === 'Backspace') {
+        digits = digits.slice(0, -1);
+        paint();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    el.addEventListener('sheet-closed', () => document.removeEventListener('keydown', onKey));
+  });
+
+  return sheet;
+}
+
+/** Ask for `user`'s PIN, then run `onSuccess`. Unlocks for the tab session. */
+export function unlockProfile(userId, onSuccess, onCancel) {
+  const user = config().users.find((u) => u.id === userId);
+  if (!user) return;
+  openPinPad({
+    title: `${user.emoji} ${user.name}`,
+    subtitle: 'Enter PIN',
+    onCancel,
+    onComplete: async (pin, ctl) => {
+      try {
+        const res = await api.verifyPin(userId, pin);
+        if (res.ok) {
+          markUnlocked(userId);
+          closeSheet();
+          sound.play('success');
+          onSuccess?.();
+        } else if (res.retryAfter) {
+          ctl.error(`Too many tries — wait ${res.retryAfter}s`);
+        } else {
+          ctl.error(`Wrong PIN — ${res.remaining} tries left`);
+        }
+      } catch (err) {
+        ctl.error(err.message);
+      }
+    },
+  });
+}
+
+/** Set, change or clear a profile PIN. Returns to the person sheet after. */
+function choosePin(userId, currentPin) {
+  const user = config().users.find((u) => u.id === userId);
+  openPinPad({
+    title: `${user.emoji} ${user.name}`,
+    subtitle: 'Choose a new 4-digit PIN',
+    onCancel: () => openUserSheet(userId),
+    onComplete: (first, ctl) => {
+      ctl.reset();
+      ctl.setSubtitle('Enter it once more');
+      // Second pass must match the first.
+      openPinPad({
+        title: `${user.emoji} ${user.name}`,
+        subtitle: 'Confirm the PIN',
+        onCancel: () => openUserSheet(userId),
+        onComplete: async (second, ctl2) => {
+          if (second !== first) return ctl2.error('PINs did not match — try again');
+          try {
+            await api.setPin(userId, first, currentPin);
+            markUnlocked(userId);
+            closeSheet();
+            sound.play('twinkle');
+            toast({ icon: '🔒', text: `PIN set for <b>${esc(user.name)}</b>`, tone: 'mint' });
+            await refresh();
+            openUserSheet(userId);
+          } catch (err) {
+            ctl2.error(err.message);
+          }
+        },
+      });
+    },
+  });
+}
+
+/** Entry point from the person sheet: verify the old PIN first if there is one. */
+function startPinChange(userId) {
+  const user = config().users.find((u) => u.id === userId);
+  if (!user.hasPin) return choosePin(userId, null);
+  openPinPad({
+    title: `${user.emoji} ${user.name}`,
+    subtitle: 'Enter the current PIN',
+    onCancel: () => openUserSheet(userId),
+    onComplete: async (pin, ctl) => {
+      try {
+        const res = await api.verifyPin(userId, pin);
+        if (!res.ok) {
+          return ctl.error(res.retryAfter ? `Too many tries — wait ${res.retryAfter}s` : 'Wrong PIN');
+        }
+        choosePin(userId, pin);
+      } catch (err) {
+        ctl.error(err.message);
+      }
+    },
+  });
+}
+
+function startPinRemoval(userId) {
+  const user = config().users.find((u) => u.id === userId);
+  openPinPad({
+    title: `${user.emoji} ${user.name}`,
+    subtitle: 'Enter the PIN to remove it',
+    onCancel: () => openUserSheet(userId),
+    onComplete: async (pin, ctl) => {
+      try {
+        await api.setPin(userId, null, pin);
+        lockProfile(userId);
+        closeSheet();
+        sound.play('undo');
+        toast({ icon: '🔓', text: `PIN removed for <b>${esc(user.name)}</b>`, tone: 'lavender' });
+        await refresh();
+        openUserSheet(userId);
+      } catch (err) {
+        ctl.error(err.message);
+      }
+    },
+  });
+}
+
 /* ------------------------------------------------------------ person sheet */
 
 export function openUserSheet(userId = null) {
@@ -165,6 +351,23 @@ export function openUserSheet(userId = null) {
     </label>
     <label class="field"><span class="lab">Avatar</span>${emojiPicker('emoji', user.emoji || '🧑', PERSON_EMOJI)}</label>
     <label class="field"><span class="lab">Colour</span>${tonePicker(user.tone || 'lavender')}</label>
+
+    <div class="section-title" style="margin-left:0">Profile lock</div>
+    ${user.id ? `
+      <div class="list-item">
+        <div style="font-size:1.4rem">${user.hasPin ? '🔒' : '🔓'}</div>
+        <div class="grow">
+          <b>${user.hasPin ? 'PIN required' : 'No PIN'}</b>
+          <div class="small muted">${user.hasPin
+            ? 'Asked for when switching to this person'
+            : 'Anyone can log entries as this person'}</div>
+        </div>
+        <button class="btn sm" data-pin-change type="button">${user.hasPin ? 'Change' : 'Set PIN'}</button>
+        ${user.hasPin ? '<button class="btn sm danger" data-pin-remove type="button">Remove</button>' : ''}
+      </div>
+      <p class="small muted">A 4-digit PIN keeps entries from being logged under the wrong name. It is a courtesy lock, not real security.</p>`
+      : '<p class="small muted">Save this person first, then you can add a PIN.</p>'}
+
     <div class="sheet-actions">
       <button class="btn" data-close type="button">Cancel</button>
       <button class="btn primary" data-save type="button">Save</button>
@@ -189,8 +392,12 @@ export function openUserSheet(userId = null) {
       });
       sound.play('success');
     });
+    sheet.querySelector('[data-pin-change]')?.addEventListener('click', () => startPinChange(user.id));
+    sheet.querySelector('[data-pin-remove]')?.addEventListener('click', () => startPinRemoval(user.id));
+
     sheet.querySelector('[data-delete]')?.addEventListener('click', async () => {
       closeSheet();
+      lockProfile(user.id);
       await saveConfig((cfgDraft) => {
         cfgDraft.users = cfgDraft.users.filter((u) => u.id !== user.id);
       });
@@ -661,7 +868,7 @@ export function renderSetup() {
       ${cfg.users.map((u) => `
         <div class="list-item" style="${toneStyle(u.tone)}">
           <div style="font-size:1.6rem">${esc(u.emoji)}</div>
-          <div class="grow"><b>${esc(u.name)}</b></div>
+          <div class="grow"><b>${esc(u.name)}</b>${u.hasPin ? ' <span class="pill">🔒 PIN</span>' : ''}</div>
           <button class="btn sm" data-act="edit-user" data-id="${esc(u.id)}">Edit</button>
         </div>`).join('')}
       <button class="btn wide" data-act="add-user">➕ Add person</button>
@@ -698,7 +905,6 @@ export function renderSetup() {
         <label class="field"><span class="lab">Volume</span>
           <input type="range" min="0" max="1" step="0.05" value="${s.volume ?? 0.6}" data-setting-range="volume" style="width:100%;min-height:auto">
         </label>
-        ${switchRow('Spoken confirmation', 'Says what was logged, and by whom', 'voice', !!s.voice)}
         ${switchRow('Vibration', 'Buzz on tap where supported', 'haptics', s.haptics !== false)}
         ${switchRow('Confirm before delete', 'Ask before removing an entry', 'confirmDelete', s.confirmDelete !== false)}
       </div>

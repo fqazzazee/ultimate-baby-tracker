@@ -28,6 +28,9 @@ export const api = {
   stopTimer: (id, extra = {}) => request(`/api/timers/${encodeURIComponent(id)}/stop`, { method: 'POST', body: extra }),
   cancelTimer: (id) => request(`/api/timers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  verifyPin: (userId, pin) => request(`/api/users/${encodeURIComponent(userId)}/verify`, { method: 'POST', body: { pin } }),
+  setPin: (userId, pin, currentPin) => request(`/api/users/${encodeURIComponent(userId)}/pin`, { method: 'POST', body: { pin, currentPin } }),
+
   snoozeAlarm: (key, minutes) => request(`/api/alarms/${encodeURIComponent(key)}/snooze`, { method: 'POST', body: { minutes } }),
   dismissAlarm: (key, dueAt) => request(`/api/alarms/${encodeURIComponent(key)}/dismiss`, { method: 'POST', body: { dueAt } }),
   armAlarm: (key) => request(`/api/alarms/${encodeURIComponent(key)}/arm`, { method: 'POST', body: {} }),

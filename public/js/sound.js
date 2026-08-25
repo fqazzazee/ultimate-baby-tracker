@@ -8,7 +8,6 @@ let ctx = null;
 let master = null;
 let enabled = true;
 let volume = 0.6;
-let voiceOn = false;
 let ringTimer = null;
 
 function ensureCtx() {
@@ -28,7 +27,6 @@ export function configure(opts = {}) {
     volume = Math.max(0, Math.min(1, Number(opts.volume) || 0));
     if (master) master.gain.value = volume;
   }
-  if ('voice' in opts) voiceOn = !!opts.voice;
 }
 
 /** Call from a real user gesture so iOS/Safari will let us make noise later. */
@@ -114,19 +112,6 @@ export function stopRinging() {
 
 export function isRinging() {
   return ringTimer !== null;
-}
-
-/** Optional spoken confirmation, e.g. "Poop, logged by Mom". */
-export function speak(text) {
-  if (!voiceOn || !enabled || !('speechSynthesis' in window)) return;
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.02;
-    u.pitch = 1.15;
-    u.volume = Math.min(1, volume + 0.2);
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  } catch { /* not fatal */ }
 }
 
 export function buzz(pattern = 18) {

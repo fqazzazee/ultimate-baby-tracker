@@ -72,7 +72,7 @@ function reconcileSelections() {
 
 function applySettings() {
   const s = settings();
-  sound.configure({ sound: s.sound !== false, volume: s.volume ?? 0.6, voice: !!s.voice });
+  sound.configure({ sound: s.sound !== false, volume: s.volume ?? 0.6 });
   setTimeFormat(s.timeFormat || '12h');
   applyTheme(s.theme || 'auto');
 }
@@ -114,6 +114,39 @@ export function applyTheme(pref) {
   }
 }
 
+/* ----------------------------------------------------------- profile locks */
+
+/**
+ * A person may protect their profile with a 4-digit PIN so entries are not
+ * logged under their name by accident. An unlock lasts for the browser tab's
+ * session; closing the tab re-locks it.
+ */
+const UNLOCK_KEY = 'bt.unlocked';
+
+function unlockedIds() {
+  try { return JSON.parse(sessionStorage.getItem(UNLOCK_KEY) || '[]'); } catch { return []; }
+}
+
+function writeUnlocked(ids) {
+  try { sessionStorage.setItem(UNLOCK_KEY, JSON.stringify(ids)); } catch { /* private mode */ }
+}
+
+/** True when this profile needs no PIN, or has already been unlocked here. */
+export function isUnlocked(userId) {
+  const user = (config().users || []).find((u) => u.id === userId);
+  if (!user || !user.hasPin) return true;
+  return unlockedIds().includes(userId);
+}
+
+export function markUnlocked(userId) {
+  const ids = unlockedIds();
+  if (!ids.includes(userId)) writeUnlocked([...ids, userId]);
+}
+
+export function lockProfile(userId) {
+  writeUnlocked(unlockedIds().filter((id) => id !== userId));
+}
+
 /* --------------------------------------------------------------- feedback */
 
 export function toast({ icon = '✅', text, tone = 'mint', actions = [], ms = 5000 }) {
@@ -151,11 +184,10 @@ export function splash(mark) {
   setTimeout(() => el.remove(), 750);
 }
 
-export function feedback({ mark, soundName, say }) {
+export function feedback({ mark, soundName }) {
   if (mark) splash(mark);
   if (soundName) sound.play(soundName);
   if (settings().haptics !== false) sound.buzz([14, 40, 14]);
-  if (say) sound.speak(say);
 }
 
 /* ------------------------------------------------------------------ sheets */
@@ -172,6 +204,7 @@ export function openSheet(html, onMount) {
   document.body.style.overflow = 'hidden';
   const sheet = back.querySelector('.sheet');
   sheetCleanup = () => {
+    sheet.dispatchEvent(new CustomEvent('sheet-closed'));
     back.remove();
     document.body.style.overflow = '';
   };
@@ -227,7 +260,7 @@ export async function quickLog(typeId, presetId) {
       await api.startTimer({
         babyId: baby.id, userId: user.id, typeId, presetId: preset.id, data: { ...preset.data },
       });
-      feedback({ mark: '⏱️', soundName: 'ding', say: `${type.label} started` });
+      feedback({ mark: '⏱️', soundName: 'ding' });
       toast({ icon: '⏱️', text: `<b>${esc(type.label)}</b> started${preset.label && preset.label !== type.label ? ` · ${esc(preset.label)}` : ''}`, tone: type.tone });
       await refresh();
     } catch (err) {
@@ -241,11 +274,7 @@ export async function quickLog(typeId, presetId) {
     const { event } = await api.addEvent({
       babyId: baby.id, userId: user.id, typeId, presetId: preset.id, data,
     });
-    feedback({
-      mark: preset.emoji || type.emoji,
-      soundName: type.sound || 'chime',
-      say: `${preset.label || type.label} logged by ${user.name}`,
-    });
+    feedback({ mark: preset.emoji || type.emoji, soundName: type.sound || 'chime' });
     toast({
       icon: preset.emoji || type.emoji,
       text: `<b>${esc(preset.label || type.label)}</b> · ${esc(user.name)} · ${esc(baby.name)}`,
@@ -278,7 +307,7 @@ export async function stopRunningTimer(id) {
     const { event } = await api.stopTimer(id, { userId: state.userId });
     const type = typeOf(config(), event.typeId);
     const mins = event.data?.duration ?? 0;
-    feedback({ mark: '✅', soundName: 'success', say: `${type.label} finished, ${mins} minutes` });
+    feedback({ mark: '✅', soundName: 'success' });
     toast({
       icon: type.emoji,
       text: `<b>${esc(type.label)}</b> · ${mins} min`,

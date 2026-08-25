@@ -4,6 +4,7 @@ import {
   state, config, currentBaby, currentUser, settings,
   refresh, render, setRenderer, saveConfig, toast, closeSheet, sheetOpen,
   quickLog, openLogSheet, stopRunningTimer, cancelRunningTimer, applyTheme,
+  isUnlocked, lockProfile,
 } from './core.js';
 import { api, subscribe } from './api.js';
 import * as sound from './sound.js';
@@ -12,7 +13,7 @@ import { toneStyle, typeOf } from './ui.js';
 import { renderTrack, renderHistory, renderAlarms } from './views.js';
 import {
   renderSetup, wireSetup, exportCSV,
-  openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet,
+  openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet, unlockProfile,
 } from './settings.js';
 
 const TABS = [
@@ -35,7 +36,6 @@ function babyStrip() {
           <span class="avatar">${esc(b.emoji || '👶')}</span>
           <span>${esc(b.name)}<span class="sub" style="display:block">${esc(babyAge(b.birthDate))}</span></span>
         </button>`).join('')}
-      ${cfg.babies.length ? '<button class="chip" data-act="add-baby">➕</button>' : ''}
     </div>`;
 }
 
@@ -50,7 +50,10 @@ function whoBar() {
           <button class="chip" style="${toneStyle(u.tone)}" data-act="pick-user" data-id="${esc(u.id)}"
             aria-pressed="${u.id === state.userId}">
             <span class="avatar">${esc(u.emoji)}</span><span>${esc(u.name)}</span>
+            ${u.hasPin ? `<span class="small">${isUnlocked(u.id) ? '🔓' : '🔒'}</span>` : ''}
           </button>`).join('')}
+        ${currentUser().hasPin && isUnlocked(state.userId)
+          ? '<button class="chip" data-act="lock-profile" title="Lock this profile">🔒</button>' : ''}
       </div>
     </div>`;
 }
@@ -86,11 +89,12 @@ function renderAll() {
       <button class="icon-btn" data-act="theme-cycle" title="Theme"
         aria-label="Switch theme">${(settings().theme || 'auto') === 'dark' ? '🌙' : (settings().theme === 'light' ? '☀️' : '🌗')}</button>
     </div>
-    ${babyStrip()}
-    ${whoBar()}`;
+    ${tabbar()}`;
+  $('#context').innerHTML = `${babyStrip()}${whoBar()}`;
   $('#view').innerHTML = viewHTML();
-  $('#tabs').innerHTML = tabbar();
   if (state.tab === 'setup') wireSetup($('#view'));
+  // Sticky day headings need to know how tall the pinned header actually is.
+  document.documentElement.style.setProperty('--header-h', `${$('#chrome').offsetHeight}px`);
   window.scrollTo(0, scrollY);
   tick();
 }
@@ -212,9 +216,20 @@ const ACTIONS = {
     await refresh();
   },
   'pick-user': (el) => {
-    state.userId = el.dataset.id;
-    store.set('userId', state.userId);
-    sound.play('pop');
+    const id = el.dataset.id;
+    const select = () => {
+      state.userId = id;
+      store.set('userId', id);
+      sound.play('pop');
+      render();
+    };
+    if (isUnlocked(id)) return select();
+    unlockProfile(id, select);
+  },
+  'lock-profile': () => {
+    lockProfile(state.userId);
+    sound.play('undo');
+    toast({ icon: '🔒', text: 'Profile locked', tone: 'lavender', ms: 2000 });
     render();
   },
   'theme-cycle': () => {
@@ -246,7 +261,11 @@ const ACTIONS = {
   'add-baby': () => openBabySheet(),
   'edit-baby': (el) => openBabySheet(el.dataset.id),
   'add-user': () => openUserSheet(),
-  'edit-user': (el) => openUserSheet(el.dataset.id),
+  'edit-user': (el) => {
+    const id = el.dataset.id;
+    if (isUnlocked(id)) return openUserSheet(id);
+    unlockProfile(id, () => openUserSheet(id));
+  },
   'add-type': () => openTypeSheet(),
   'edit-type': (el) => openTypeSheet(el.dataset.id),
   'unhide-type': (el) => saveConfig((cfg) => {
@@ -306,6 +325,23 @@ function onClick(ev) {
   });
 }
 
+/**
+ * If the remembered profile is PIN-locked, ask for it before anything can be
+ * logged under that name. Cancelling falls back to an unlocked profile; when
+ * every profile has a PIN there is nowhere to fall back to, so the pad stays.
+ */
+function ensureProfileUnlocked() {
+  const cfg = config();
+  if (!cfg.users.length || isUnlocked(state.userId)) return;
+  const open = cfg.users.find((u) => !u.hasPin);
+  unlockProfile(state.userId, render, () => {
+    if (!open) return ensureProfileUnlocked();
+    state.userId = open.id;
+    store.set('userId', open.id);
+    render();
+  });
+}
+
 /* -------------------------------------------------------------------- boot */
 
 async function boot() {
@@ -329,6 +365,7 @@ async function boot() {
   await refresh();
   if (!config().babies.length) state.tab = 'track';
   render();
+  ensureProfileUnlocked();
 
   setInterval(tick, 1000);
   subscribe({

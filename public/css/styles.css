@@ -86,7 +86,7 @@ body {
   color: var(--text);
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
-  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
 }
 
 /* Soft nursery blobs behind everything. */
@@ -128,7 +128,7 @@ button { cursor: pointer; }
   padding-top: env(safe-area-inset-top);
 }
 
-.topbar-inner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.topbar-inner { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; }
 
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 1.05rem; }
 .brand .logo { font-size: 1.4rem; }
@@ -307,7 +307,7 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------------ history */
 
 .day-head {
-  position: sticky; top: 60px;
+  position: sticky; top: var(--header-h, 120px);
   display: flex; align-items: baseline; gap: 8px;
   padding: 10px 4px 6px;
   font-weight: 900;
@@ -500,29 +500,30 @@ input:focus, select:focus, textarea:focus {
 /* --------------------------------------------------------------- bottom nav */
 
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
   display: flex;
-  gap: 2px;
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  backdrop-filter: blur(16px);
-  border-top: 1px solid var(--line);
+  gap: 4px;
+  padding: 0 10px 8px;
 }
 .tabbar button {
   flex: 1;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 8px 4px;
-  min-height: 58px;
+  padding: 7px 4px;
+  min-height: 54px;
   border: none; background: transparent;
   color: var(--muted);
   font-size: 0.68rem; font-weight: 800;
   border-radius: 16px;
   position: relative;
+  transition: background .18s ease, color .18s ease;
 }
 .tabbar button .ico { font-size: 1.35rem; line-height: 1; }
-.tabbar button[aria-current='page'] { color: var(--text); background: var(--surface-2); }
+.tabbar button[aria-current='page'] {
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--pink) 45%, transparent);
+}
 .tabbar .badge {
-  position: absolute; top: 4px; right: 22%;
+  position: absolute; top: 2px; right: 22%;
   min-width: 18px; height: 18px; padding: 0 5px;
   border-radius: 999px;
   background: var(--danger); color: #fff;
@@ -558,11 +559,58 @@ input:focus, select:focus, textarea:focus {
 .sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
 .sheet-actions .btn { flex: 1; }
 
+/* --------------------------------------------------------------- PIN keypad */
+
+.pin-dots {
+  display: flex; justify-content: center; gap: 16px;
+  margin: 4px 0 20px;
+}
+.pin-dot {
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--surface-2);
+  transition: transform .16s cubic-bezier(.34, 1.56, .64, 1), background .16s ease;
+}
+.pin-dot.on {
+  background: var(--pink);
+  border-color: transparent;
+  transform: scale(1.25);
+}
+.pin-dots.shake { animation: shake .42s ease; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-9px); }
+  40% { transform: translateX(9px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+.pin-error { color: var(--danger); font-weight: 800; }
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 330px;
+  margin: 0 auto;
+}
+.key {
+  min-height: 64px;
+  border-radius: 18px;
+  border: 2px solid var(--line);
+  background: var(--surface-2);
+  font-size: 1.5rem;
+  font-weight: 800;
+  transition: transform .1s ease, background .18s ease;
+}
+.key:active { transform: scale(0.94); background: var(--surface-3); }
+.key.ghost { font-size: 0.9rem; color: var(--muted); background: transparent; border-style: dashed; }
+
 /* ------------------------------------------------------------------- toasts */
 
 #toasts {
   position: fixed; left: 0; right: 0; z-index: 80;
-  bottom: calc(84px + env(safe-area-inset-bottom));
+  bottom: calc(20px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   pointer-events: none;
   padding: 0 12px;
@@ -625,14 +673,6 @@ input:focus, select:focus, textarea:focus {
 
 @media (min-width: 700px) {
   .preset-row .tap { flex: 1 1 120px; }
-  body { padding-bottom: 24px; }
-  .tabbar {
-    position: sticky; bottom: 16px;
-    width: min(760px, calc(100% - 28px));
-    margin: 20px auto 0;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--line);
-    box-shadow: var(--shadow);
-  }
-  #toasts { bottom: 24px; }
+  .tabbar { width: min(760px, 100%); margin: 0 auto; }
+  .tabbar button { flex-direction: row; gap: 8px; font-size: 0.85rem; }
 }
