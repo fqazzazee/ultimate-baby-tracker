@@ -2,7 +2,7 @@
 /**
  * Ultimate Baby Tracker - zero-dependency HTTP server.
  *
- *   node server.js                 # http://localhost:8080
+ *   node server.js                 # http://localhost:8477
  *   BT_PORT=3000 node server.js
  *   BT_DATA_DIR=/srv/baby node server.js
  *
@@ -19,7 +19,7 @@ import { computeAlarmInstances, instanceKey } from './lib/alarms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const PORT = Number(process.env.BT_PORT || 8080);
+const PORT = Number(process.env.BT_PORT || 8477);
 const HOST = process.env.BT_HOST || '0.0.0.0';
 const MAX_BODY = 1_000_000;
 
@@ -286,6 +286,15 @@ const server = http.createServer((req, res) => {
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
   serveStatic(req, res, url);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n  Port ${PORT} is already in use. Pick another one:\n`);
+    console.error(`      BT_PORT=8478 node server.js\n`);
+    process.exit(1);
+  }
+  throw err;
 });
 
 store.init();

@@ -16,14 +16,14 @@ anything else you care to invent. Built for 3 a.m. operation with one thumb.
 
 ```bash
 node server.js
-# → http://localhost:8080
+# → http://localhost:8477
 ```
 
 That's the whole install. Node 18 or newer, nothing to `npm install`.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `BT_PORT` | `8080` | Port to listen on |
+| `BT_PORT` | `8477` | Port to listen on |
 | `BT_HOST` | `0.0.0.0` | Bind address — the default lets phones on your Wi-Fi connect |
 | `BT_DATA_DIR` | `./data` | Where the plain-text files are kept |
 
@@ -31,7 +31,7 @@ That's the whole install. Node 18 or newer, nothing to `npm install`.
 BT_PORT=3000 BT_DATA_DIR=/srv/baby node server.js
 ```
 
-Open `http://<your-computer's-IP>:8080` on a phone and add it to the home
+Open `http://<your-computer's-IP>:8477` on a phone and add it to the home
 screen — it installs as a standalone app.
 
 > There is no authentication, on purpose. Run it on a network you trust; don't
@@ -128,7 +128,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/bin/node /opt/baby-tracker/server.js
-Environment=BT_PORT=8080 BT_DATA_DIR=/var/lib/baby-tracker
+Environment=BT_PORT=8477 BT_DATA_DIR=/var/lib/baby-tracker
 Restart=always
 User=baby
 
