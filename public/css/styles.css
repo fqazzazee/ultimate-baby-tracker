@@ -171,24 +171,31 @@ button { cursor: pointer; }
 }
 .chip-strip::-webkit-scrollbar { display: none; }
 
-.ctx-block {
-  border-top: 1px solid var(--line);
-  padding: 6px 0 4px;
+/* Tabs and the baby/profile chips share one band: side by side when there is
+   room, chips wrapping under the tabs on a phone. */
+.navbar {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px 12px;
+  padding: 0 10px 6px;
 }
-.ctx-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 2px 12px 4px;
+.navbar .tabbar { flex: 1 1 300px; padding: 0; }
+
+.ctx-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0;
+  scrollbar-width: none;
 }
-.ctx-label {
+.ctx-strip::-webkit-scrollbar { display: none; }
+.ctx-group { display: flex; align-items: center; gap: 6px; }
+.ctx-div {
   flex: 0 0 auto;
-  width: 34px;
-  font-size: 0.62rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
+  width: 1px; height: 24px;
+  margin: 0 2px;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
 }
-.ctx-row .chip-strip { padding: 2px 0; flex: 1; }
 .lockmark { font-size: 0.85rem; }
 
 .chip {
@@ -210,6 +217,15 @@ button { cursor: pointer; }
 }
 .chip .avatar { font-size: 1.2rem; }
 .chip .sub { font-weight: 600; font-size: 0.75rem; color: var(--muted); }
+
+.chip.mini {
+  gap: 6px;
+  padding: 5px 11px;
+  min-height: 38px;
+  border-width: 2px;
+  font-size: 0.82rem;
+}
+.chip.mini .avatar { font-size: 1.05rem; }
 
 /* -------------------------------------------------------------------- cards */
 
@@ -738,6 +754,9 @@ input:focus, select:focus, textarea:focus {
 
 @media (min-width: 700px) {
   .preset-row .tap { flex: 1 1 120px; }
-  .tabbar { width: min(760px, 100%); margin: 0 auto; }
+  .navbar { width: min(980px, 100%); margin: 0 auto; flex-wrap: nowrap; }
+  .navbar .tabbar { flex: 0 1 auto; }
+  /* auto margin (not justify-content) so an overflowing strip stays scrollable */
+  .ctx-strip { flex: 0 1 auto; margin-left: auto; }
   .tabbar button { flex-direction: row; gap: 8px; font-size: 0.85rem; }
 }
