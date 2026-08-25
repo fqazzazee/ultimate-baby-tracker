@@ -13,18 +13,6 @@ anything else you care to invent. Built for 3 a.m. operation with one thumb.
 - **Programmable alarms** — "tell me if she hasn't fed in 3 hours".
 - **Light and dark nursery themes**, big buttons, sound and vibration feedback.
 
-## Security notice
-
-**This application has no authentication and no encryption, and was not
-designed with either in mind.** There are no accounts, no sessions, no
-passwords and no TLS. Every HTTP endpoint is open to anyone who can reach the
-port, and all data — including the event log and config — is stored and served
-as plain text.
-
-The optional 4-digit profile PINs are not a security control. They only stop
-family members from logging entries under each other's names; they do not
-protect the API, which will happily answer unauthenticated requests.
-
 Deploy it accordingly:
 
 - Put it **behind a reverse proxy** (nginx, Caddy, Traefik) and let the proxy
@@ -135,6 +123,18 @@ Setup → Buttons → **New button** builds a tracked event from scratch:
 
 The built-in buttons are ordinary entries in the same config, so you can edit
 or hide any of them.
+
+## Security notice
+
+**This application has no authentication and no encryption, and was not
+designed with either in mind.** There are no accounts, no sessions, no
+passwords and no TLS. Every HTTP endpoint is open to anyone who can reach the
+port, and all data — including the event log and config — is stored and served
+as plain text.
+
+The optional 4-digit profile PINs are not a security control. They only stop
+family members from logging entries under each other's names; they do not
+protect the API, which will happily answer unauthenticated requests.
 
 ## Where the data lives
 
