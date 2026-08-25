@@ -22,10 +22,18 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 /** Identity shown in the header and on the About card, straight from package.json. */
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+/** package.json allows either "Name <email> (url)" or an object; accept both. */
+function parseAuthor(author) {
+  if (!author) return null;
+  if (typeof author === 'object') return { name: author.name, url: author.url || '' };
+  const m = /^\s*([^<(]+?)\s*(?:<[^>]*>)?\s*(?:\(([^)]*)\))?\s*$/.exec(author);
+  return m ? { name: m[1], url: m[2] || '' } : { name: String(author), url: '' };
+}
+
 const APP = {
   name: pkg.displayName || pkg.name,
   version: pkg.version,
-  author: pkg.author,
+  author: parseAuthor(pkg.author),
   license: pkg.license,
   repository: (pkg.repository?.url || '').replace(/^git\+/, '').replace(/\.git$/, ''),
   homepage: pkg.homepage,

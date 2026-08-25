@@ -927,7 +927,7 @@ function aboutCard() {
   const app = state.data?.app || {};
   const repo = app.repository || '';
   const readme = app.homepage || (repo ? `${repo}#readme` : '');
-  const authorUrl = app.author ? `https://github.com/${app.author}` : '';
+  const author = app.author || null;
 
   return `
     <div class="section-title">About</div>
@@ -946,7 +946,9 @@ function aboutCard() {
       <div class="about-links">
         ${repo ? `<a class="btn wide" href="${esc(repo)}" target="_blank" rel="noreferrer noopener">📦 Source code<span class="small muted">${esc(repo.replace(/^https?:\/\//, ''))}</span></a>` : ''}
         ${readme ? `<a class="btn wide" href="${esc(readme)}" target="_blank" rel="noreferrer noopener">📖 Read the docs<span class="small muted">Setup, alarms, custom buttons, API</span></a>` : ''}
-        ${authorUrl ? `<a class="btn wide" href="${esc(authorUrl)}" target="_blank" rel="noreferrer noopener">👤 ${esc(app.author)}<span class="small muted">Author</span></a>` : ''}
+        ${author?.name ? (author.url
+          ? `<a class="btn wide" href="${esc(author.url)}" target="_blank" rel="noreferrer noopener">👤 ${esc(author.name)}<span class="small muted">Author</span></a>`
+          : `<div class="btn wide">👤 ${esc(author.name)}<span class="small muted">Author</span></div>`) : ''}
       </div>
 
       <div class="notice">

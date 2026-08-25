@@ -1,6 +1,6 @@
 {
   "name": "ultimate-baby-tracker",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "displayName": "Ultimate Baby Tracker",
   "description": "One-tap newborn tracker: feeds, diapers, sleep, custom buttons and programmable alarms. Zero dependencies, plain-text storage.",
   "type": "module",
@@ -12,7 +12,10 @@
   "engines": {
     "node": ">=18"
   },
-  "author": "fqazzazee",
+  "author": {
+    "name": "Fadi Qazzazee",
+    "url": "https://github.com/fqazzazee"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
