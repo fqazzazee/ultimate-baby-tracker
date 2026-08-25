@@ -1,0 +1,9 @@
+# Runtime data - your actual baby logs live here, never commit them
+data/
+*.log.corrupt-*
+*.tmp-*
+
+node_modules/
+npm-debug.log*
+.DS_Store
+.env
