@@ -13,6 +13,31 @@ anything else you care to invent. Built for 3 a.m. operation with one thumb.
 - **Programmable alarms** — "tell me if she hasn't fed in 3 hours".
 - **Light and dark nursery themes**, big buttons, sound and vibration feedback.
 
+## Security notice
+
+**This application has no authentication and no encryption, and was not
+designed with either in mind.** There are no accounts, no sessions, no
+passwords and no TLS. Every HTTP endpoint is open to anyone who can reach the
+port, and all data — including the event log and config — is stored and served
+as plain text.
+
+The optional 4-digit profile PINs are not a security control. They only stop
+family members from logging entries under each other's names; they do not
+protect the API, which will happily answer unauthenticated requests.
+
+Deploy it accordingly:
+
+- Put it **behind a reverse proxy** (nginx, Caddy, Traefik) and let the proxy
+  terminate TLS and handle any authentication you need — basic auth, an
+  identity-aware proxy, mTLS, a VPN, whatever suits you.
+- Apply **proper network segmentation**: bind it to a trusted VLAN or a
+  WireGuard/Tailscale interface, and use firewall rules so only the proxy can
+  reach the app port. Setting `BT_HOST=127.0.0.1` keeps it off the network
+  entirely when a proxy is running on the same host.
+- **Never expose it directly to the internet**, and don't port-forward to it.
+
+It is a family notebook on a trusted LAN. Treat it as one.
+
 ## Run it
 
 ```bash
@@ -35,8 +60,8 @@ BT_PORT=3000 BT_DATA_DIR=/srv/baby node server.js
 Open `http://<your-computer's-IP>:8477` on a phone and add it to the home
 screen — it installs as a standalone app.
 
-> There is no authentication, on purpose. Run it on a network you trust; don't
-> expose it directly to the internet.
+> No authentication, no encryption — see the [security notice](#security-notice)
+> above. Put it behind a reverse proxy on a segmented network.
 
 ## Using it
 
@@ -60,7 +85,9 @@ totals. Tap any entry to edit or delete it. Exports to CSV.
 
 **Alarms** — see below.
 
-**Setup** — babies, people, buttons, theme and sound.
+**Setup** — babies, people, buttons, theme and sound, plus an **About** card at
+the bottom with the version, links back to this repository and the docs, and a
+reminder of the security posture above.
 
 ## Profile locks
 
@@ -72,9 +99,9 @@ re-locks immediately.
 
 PINs are stored as salted scrypt hashes and are never sent to the browser; the
 server only answers "yes" or "no", and five wrong guesses trigger a 30-second
-lockout. That said, a four-digit code is a courtesy lock between people who
-already trust each other — the API itself is still unauthenticated, so keep the
-app on a network you trust.
+lockout. Even so, a four-digit code is a courtesy lock between people who
+already trust each other, not a security boundary — see the
+[security notice](#security-notice).
 
 ## Alarms
 
@@ -154,4 +181,43 @@ User=baby
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Bind to localhost and let a proxy face the network:
+
+```ini
+Environment=BT_HOST=127.0.0.1 BT_PORT=8477 BT_DATA_DIR=/var/lib/baby-tracker
+```
+
+```nginx
+# /etc/nginx/conf.d/baby-tracker.conf
+server {
+    listen 443 ssl;
+    server_name baby.home.lan;
+
+    ssl_certificate     /etc/ssl/certs/home.crt;
+    ssl_certificate_key /etc/ssl/private/home.key;
+
+    # Whatever authentication you want, added here rather than in the app.
+    auth_basic           "Baby Tracker";
+    auth_basic_user_file /etc/nginx/baby.htpasswd;
+
+    # Only the trusted subnet may reach the proxy at all.
+    allow 10.10.20.0/24;
+    deny  all;
+
+    location / {
+        proxy_pass http://127.0.0.1:8477;
+        proxy_http_version 1.1;
+
+        # /api/stream is server-sent events: keep it open and unbuffered.
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
 ```

@@ -1,14 +1,23 @@
 {
   "name": "ultimate-baby-tracker",
-  "version": "1.0.0",
-  "description": "Dead-simple newborn tracker: feeds, diapers, baths and anything else you want to log. Zero dependencies, plain-text storage.",
+  "version": "1.1.0",
+  "displayName": "Ultimate Baby Tracker",
+  "description": "One-tap newborn tracker: feeds, diapers, sleep, custom buttons and programmable alarms. Zero dependencies, plain-text storage.",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "fqazzazee",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fqazzazee/ultimate-baby-tracker"
+  },
+  "homepage": "https://github.com/fqazzazee/ultimate-baby-tracker#readme",
   "private": true
 }

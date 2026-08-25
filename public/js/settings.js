@@ -917,7 +917,46 @@ export function renderSetup() {
         </p>
         <button class="btn wide" data-act="export">⬇️ Export CSV</button>
       </div>
-      <p class="center small muted" style="margin:18px 0">Made with 🍼 and very little sleep.</p>
+
+      ${aboutCard()}
+    </div>`;
+}
+
+/** The About card that closes the Setup screen. */
+function aboutCard() {
+  const app = state.data?.app || {};
+  const repo = app.repository || '';
+  const readme = app.homepage || (repo ? `${repo}#readme` : '');
+  const authorUrl = app.author ? `https://github.com/${app.author}` : '';
+
+  return `
+    <div class="section-title">About</div>
+    <div class="card about">
+      <div class="row" style="gap:14px">
+        <div class="about-logo">🍼</div>
+        <div class="grow" style="flex:1;min-width:0">
+          <h2 style="font-size:1.15rem">${esc(app.name || 'Ultimate Baby Tracker')}</h2>
+          <div class="small muted">Version ${esc(app.version || '—')}${app.license ? ` · ${esc(app.license)} licence` : ''}</div>
+        </div>
+      </div>
+
+      <p class="small muted">One-tap tracking for feeds, diapers, sleep and anything else worth
+      remembering — built to be usable with one thumb at three in the morning.</p>
+
+      <div class="about-links">
+        ${repo ? `<a class="btn wide" href="${esc(repo)}" target="_blank" rel="noreferrer noopener">📦 Source code<span class="small muted">${esc(repo.replace(/^https?:\/\//, ''))}</span></a>` : ''}
+        ${readme ? `<a class="btn wide" href="${esc(readme)}" target="_blank" rel="noreferrer noopener">📖 Read the docs<span class="small muted">Setup, alarms, custom buttons, API</span></a>` : ''}
+        ${authorUrl ? `<a class="btn wide" href="${esc(authorUrl)}" target="_blank" rel="noreferrer noopener">👤 ${esc(app.author)}<span class="small muted">Author</span></a>` : ''}
+      </div>
+
+      <div class="notice">
+        <b>🔓 No authentication or encryption.</b>
+        This app has none and was never designed to have any — the 4-digit profile
+        PINs only stop entries being logged under the wrong name. Run it behind a
+        reverse proxy on a segmented network, never exposed to the internet.
+      </div>
+
+      <p class="center small muted" style="margin:14px 0 0">Made with 🍼 and very little sleep.</p>
     </div>`;
 }
 

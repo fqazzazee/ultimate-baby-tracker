@@ -128,13 +128,32 @@ button { cursor: pointer; }
   padding-top: env(safe-area-inset-top);
 }
 
-.topbar-inner { display: flex; align-items: center; gap: 10px; padding: 8px 14px 4px; }
+.topbar-inner { display: flex; align-items: center; gap: 8px; padding: 7px 12px 3px; }
 
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 1.05rem; }
-.brand .logo { font-size: 1.4rem; }
+.brand {
+  display: flex; align-items: baseline; gap: 7px;
+  min-width: 0;
+  font-weight: 900;
+}
+.brand .logo { font-size: 1.3rem; align-self: center; }
+.brand-name {
+  font-size: 1.02rem;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand .ver {
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  flex: 0 0 auto;
+}
 
 .icon-btn {
-  width: 46px; height: 46px;
+  width: 44px; height: 44px;
+  flex: 0 0 auto;
   display: grid; place-items: center;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -152,10 +171,30 @@ button { cursor: pointer; }
 }
 .chip-strip::-webkit-scrollbar { display: none; }
 
+.ctx-block {
+  border-top: 1px solid var(--line);
+  padding: 6px 0 4px;
+}
+.ctx-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 2px 12px 4px;
+}
+.ctx-label {
+  flex: 0 0 auto;
+  width: 34px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.ctx-row .chip-strip { padding: 2px 0; flex: 1; }
+.lockmark { font-size: 0.85rem; }
+
 .chip {
   flex: 0 0 auto;
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 15px;
+  padding: 8px 14px;
   min-height: 46px;
   border-radius: 999px;
   border: 2px solid var(--line);
@@ -171,14 +210,6 @@ button { cursor: pointer; }
 }
 .chip .avatar { font-size: 1.2rem; }
 .chip .sub { font-weight: 600; font-size: 0.75rem; color: var(--muted); }
-
-.whobar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 2px 14px 8px;
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-weight: 700;
-}
 
 /* -------------------------------------------------------------------- cards */
 
@@ -255,7 +286,7 @@ button { cursor: pointer; }
 
 /* The big one-tap buttons. */
 .tap {
-  flex: 1 1 96px;
+  flex: 1 1 72px;
   min-height: var(--tap);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px;
@@ -275,7 +306,7 @@ button { cursor: pointer; }
 .tap .ico { font-size: 1.5rem; line-height: 1; }
 .tap:active { transform: translateY(3px) scale(0.97); box-shadow: var(--shadow-sm); }
 .tap.ghost {
-  flex: 0 0 58px;
+  flex: 0 0 48px;
   background: var(--surface-2);
   color: var(--muted);
   box-shadow: none;
@@ -502,7 +533,7 @@ input:focus, select:focus, textarea:focus {
 .tabbar {
   display: flex;
   gap: 4px;
-  padding: 0 10px 8px;
+  padding: 0 10px 6px;
 }
 .tabbar button {
   flex: 1;
@@ -558,6 +589,40 @@ input:focus, select:focus, textarea:focus {
 .sheet h3 { font-size: 1.15rem; margin-bottom: 12px; }
 .sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
 .sheet-actions .btn { flex: 1; }
+
+/* -------------------------------------------------------------- about card */
+
+.about-logo {
+  width: 56px; height: 56px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  font-size: 1.9rem;
+  border-radius: 18px;
+  background: linear-gradient(150deg,
+    color-mix(in srgb, var(--pink) 34%, var(--surface)),
+    color-mix(in srgb, var(--sky) 30%, var(--surface)));
+}
+
+.about-links { display: grid; gap: 8px; margin: 14px 0 4px; }
+.about-links .btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left;
+  text-decoration: none;
+  min-height: 60px;
+  justify-content: center;
+}
+.about-links .btn .small { font-weight: 600; }
+
+/* Standing warning - deliberately hard to skim past. */
+.notice {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 2px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--danger-soft);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+.notice b { display: block; margin-bottom: 3px; }
 
 /* --------------------------------------------------------------- PIN keypad */
 

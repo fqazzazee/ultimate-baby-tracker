@@ -25,37 +25,40 @@ const TABS = [
 
 /* ------------------------------------------------------------------ chrome */
 
+/** One labelled row of selector chips inside the header. */
+function contextRow(label, chips) {
+  return `
+    <div class="ctx-row">
+      <span class="ctx-label">${esc(label)}</span>
+      <div class="chip-strip">${chips}</div>
+    </div>`;
+}
+
 function babyStrip() {
   const cfg = config();
-  if (cfg.babies.length < 1) return '';
-  return `
-    <div class="chip-strip">
-      ${cfg.babies.map((b) => `
-        <button class="chip" style="${toneStyle(b.tone)}" data-act="pick-baby" data-id="${esc(b.id)}"
-          aria-pressed="${b.id === state.babyId}">
-          <span class="avatar">${esc(b.emoji || '👶')}</span>
-          <span>${esc(b.name)}<span class="sub" style="display:block">${esc(babyAge(b.birthDate))}</span></span>
-        </button>`).join('')}
-    </div>`;
+  if (!cfg.babies.length) return '';
+  const chips = cfg.babies.map((b) => `
+    <button class="chip" style="${toneStyle(b.tone)}" data-act="pick-baby" data-id="${esc(b.id)}"
+      aria-pressed="${b.id === state.babyId}">
+      <span class="avatar">${esc(b.emoji || '👶')}</span>
+      <span>${esc(b.name)}<span class="sub" style="display:block">${esc(babyAge(b.birthDate))}</span></span>
+    </button>`).join('');
+  return contextRow('Baby', chips);
 }
 
 function whoBar() {
   const cfg = config();
   if (!cfg.babies.length) return '';
-  return `
-    <div class="whobar">
-      <span>Logging as</span>
-      <div class="chip-strip" style="padding:0;flex:1">
-        ${cfg.users.map((u) => `
-          <button class="chip" style="${toneStyle(u.tone)}" data-act="pick-user" data-id="${esc(u.id)}"
-            aria-pressed="${u.id === state.userId}">
-            <span class="avatar">${esc(u.emoji)}</span><span>${esc(u.name)}</span>
-            ${u.hasPin ? `<span class="small">${isUnlocked(u.id) ? '🔓' : '🔒'}</span>` : ''}
-          </button>`).join('')}
-        ${currentUser().hasPin && isUnlocked(state.userId)
-          ? '<button class="chip" data-act="lock-profile" title="Lock this profile">🔒</button>' : ''}
-      </div>
-    </div>`;
+  const chips = `
+    ${cfg.users.map((u) => `
+      <button class="chip" style="${toneStyle(u.tone)}" data-act="pick-user" data-id="${esc(u.id)}"
+        aria-pressed="${u.id === state.userId}">
+        <span class="avatar">${esc(u.emoji)}</span><span>${esc(u.name)}</span>
+        ${u.hasPin ? `<span class="lockmark">${isUnlocked(u.id) ? '🔓' : '🔒'}</span>` : ''}
+      </button>`).join('')}
+    ${currentUser().hasPin && isUnlocked(state.userId)
+      ? '<button class="chip" data-act="lock-profile" title="Lock this profile" aria-label="Lock this profile">🔒</button>' : ''}`;
+  return contextRow('Who', chips);
 }
 
 function tabbar() {
@@ -79,18 +82,31 @@ function viewHTML() {
   }
 }
 
+function brandRow() {
+  const app = state.data?.app || {};
+  const theme = settings().theme || 'auto';
+  const icon = theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '🌗';
+  return `
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="logo">🍼</span>
+        <span class="brand-name">${esc(app.name || 'Ultimate Baby Tracker')}</span>
+        ${app.version ? `<span class="ver">v${esc(app.version)}</span>` : ''}
+      </div>
+      <div class="spacer"></div>
+      <button class="icon-btn" data-act="theme-cycle" title="Theme (${esc(theme)})"
+        aria-label="Switch theme">${icon}</button>
+    </div>`;
+}
+
 function renderAll() {
   if (!state.data) return;
   const scrollY = window.scrollY;
+  const context = `${babyStrip()}${whoBar()}`;
   $('#chrome').innerHTML = `
-    <div class="topbar-inner">
-      <div class="brand"><span class="logo">🍼</span><span>Baby Tracker</span></div>
-      <div class="spacer"></div>
-      <button class="icon-btn" data-act="theme-cycle" title="Theme"
-        aria-label="Switch theme">${(settings().theme || 'auto') === 'dark' ? '🌙' : (settings().theme === 'light' ? '☀️' : '🌗')}</button>
-    </div>
-    ${tabbar()}`;
-  $('#context').innerHTML = `${babyStrip()}${whoBar()}`;
+    ${brandRow()}
+    ${tabbar()}
+    ${context ? `<div class="ctx-block">${context}</div>` : ''}`;
   $('#view').innerHTML = viewHTML();
   if (state.tab === 'setup') wireSetup($('#view'));
   // Sticky day headings need to know how tall the pinned header actually is.

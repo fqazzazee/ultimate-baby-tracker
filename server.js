@@ -19,6 +19,17 @@ import { computeAlarmInstances, instanceKey } from './lib/alarms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+/** Identity shown in the header and on the About card, straight from package.json. */
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+const APP = {
+  name: pkg.displayName || pkg.name,
+  version: pkg.version,
+  author: pkg.author,
+  license: pkg.license,
+  repository: (pkg.repository?.url || '').replace(/^git\+/, '').replace(/\.git$/, ''),
+  homepage: pkg.homepage,
+};
 const PORT = Number(process.env.BT_PORT || 8477);
 const HOST = process.env.BT_HOST || '0.0.0.0';
 const MAX_BODY = 1_000_000;
@@ -110,6 +121,7 @@ function buildState(url) {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   return {
     rev: store.getRevision(),
+    app: APP,
     serverTime: new Date().toISOString(),
     config,
     events: store.listEvents({ babyId, since, limit: 1000 }),
@@ -322,7 +334,7 @@ server.on('error', (err) => {
 
 store.init();
 server.listen(PORT, HOST, () => {
-  console.log(`\n  🍼 Ultimate Baby Tracker`);
+  console.log(`\n  🍼 ${APP.name} v${APP.version}`);
   console.log(`     http://localhost:${PORT}   (data: ${store.dataDir()})\n`);
 });
 
