@@ -25,40 +25,39 @@ const TABS = [
 
 /* ------------------------------------------------------------------ chrome */
 
-/** One labelled row of selector chips inside the header. */
-function contextRow(label, chips) {
-  return `
-    <div class="ctx-row">
-      <span class="ctx-label">${esc(label)}</span>
-      <div class="chip-strip">${chips}</div>
-    </div>`;
-}
-
-function babyStrip() {
+/** Baby and profile chips, merged into one strip that rides with the tabs. */
+function babyChips() {
   const cfg = config();
-  if (!cfg.babies.length) return '';
-  const chips = cfg.babies.map((b) => `
-    <button class="chip" style="${toneStyle(b.tone)}" data-act="pick-baby" data-id="${esc(b.id)}"
-      aria-pressed="${b.id === state.babyId}">
-      <span class="avatar">${esc(b.emoji || '👶')}</span>
-      <span>${esc(b.name)}<span class="sub" style="display:block">${esc(babyAge(b.birthDate))}</span></span>
+  return cfg.babies.map((b) => `
+    <button class="chip mini" style="${toneStyle(b.tone)}" data-act="pick-baby" data-id="${esc(b.id)}"
+      aria-pressed="${b.id === state.babyId}" aria-label="Track ${esc(b.name)}"
+      title="${esc(b.name)}${babyAge(b.birthDate) ? ` · ${esc(babyAge(b.birthDate))}` : ''}">
+      <span class="avatar">${esc(b.emoji || '👶')}</span><span>${esc(b.name)}</span>
     </button>`).join('');
-  return contextRow('Baby', chips);
 }
 
-function whoBar() {
+function userChips() {
   const cfg = config();
-  if (!cfg.babies.length) return '';
-  const chips = `
+  return `
     ${cfg.users.map((u) => `
-      <button class="chip" style="${toneStyle(u.tone)}" data-act="pick-user" data-id="${esc(u.id)}"
-        aria-pressed="${u.id === state.userId}">
+      <button class="chip mini" style="${toneStyle(u.tone)}" data-act="pick-user" data-id="${esc(u.id)}"
+        aria-pressed="${u.id === state.userId}" aria-label="Log as ${esc(u.name)}" title="Log as ${esc(u.name)}">
         <span class="avatar">${esc(u.emoji)}</span><span>${esc(u.name)}</span>
         ${u.hasPin ? `<span class="lockmark">${isUnlocked(u.id) ? '🔓' : '🔒'}</span>` : ''}
       </button>`).join('')}
     ${currentUser().hasPin && isUnlocked(state.userId)
-      ? '<button class="chip" data-act="lock-profile" title="Lock this profile" aria-label="Lock this profile">🔒</button>' : ''}`;
-  return contextRow('Who', chips);
+      ? '<button class="chip mini" data-act="lock-profile" title="Lock this profile" aria-label="Lock this profile">🔒</button>' : ''}`;
+}
+
+function contextStrip() {
+  const cfg = config();
+  if (!cfg.babies.length) return '';
+  return `
+    <div class="ctx-strip">
+      <div class="ctx-group" role="group" aria-label="Baby">${babyChips()}</div>
+      <span class="ctx-div" aria-hidden="true"></span>
+      <div class="ctx-group" role="group" aria-label="Who is logging">${userChips()}</div>
+    </div>`;
 }
 
 function tabbar() {
@@ -102,11 +101,12 @@ function brandRow() {
 function renderAll() {
   if (!state.data) return;
   const scrollY = window.scrollY;
-  const context = `${babyStrip()}${whoBar()}`;
   $('#chrome').innerHTML = `
     ${brandRow()}
-    ${tabbar()}
-    ${context ? `<div class="ctx-block">${context}</div>` : ''}`;
+    <div class="navbar">
+      ${tabbar()}
+      ${contextStrip()}
+    </div>`;
   $('#view').innerHTML = viewHTML();
   if (state.tab === 'setup') wireSetup($('#view'));
   // Sticky day headings need to know how tall the pinned header actually is.

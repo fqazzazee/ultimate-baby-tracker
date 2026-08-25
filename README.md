@@ -48,8 +48,9 @@ on it logs immediately: tap **Poop** and the time is saved, with a chime, a
 stamp on screen and a buzz. A toast offers **Undo** and **Details** for a few
 seconds afterwards, so a mis-tap costs nothing.
 
-- Pick the baby (top strip) and who you are ("Logging as") once; both stick.
-  Adding a baby lives in **Setup**, out of the way of accidental taps.
+- Pick the baby and who you are once, from the chips beside the tabs; both
+  stick. Babies come first, then people, with a divider between them. Adding a
+  baby lives in **Setup**, out of the way of accidental taps.
 - **Breastfeed** and **Sleep** are timers: first tap starts, second tap stops
   and saves the duration. A running timer survives a server restart.
 - The **⋯** button on any card opens the full form — amount, side, a different
@@ -69,8 +70,8 @@ reminder of the security posture above.
 Any person can set a 4-digit PIN in **Setup → People → Edit**. Once set, the PIN
 is asked for before you can switch to that person, edit their profile, or start
 the app as them — so entries don't get logged under the wrong name. An unlock
-lasts until the browser tab is closed, and the 🔒 chip beside the people row
-re-locks immediately.
+lasts until the browser tab is closed, and the 🔒 chip at the end of the
+people chips re-locks immediately.
 
 PINs are stored as salted scrypt hashes and are never sent to the browser; the
 server only answers "yes" or "no", and five wrong guesses trigger a 30-second
