@@ -39,14 +39,24 @@ On Linux that sets it up as a background service that starts with your machine.
 ```powershell
 git clone https://github.com/fqazzazee/ultimate-baby-tracker.git
 cd ultimate-baby-tracker
-.\scripts\install.ps1 install
+.\scripts\install.cmd install
+```
+
+Or without cloning first:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/fqazzazee/ultimate-baby-tracker/main/scripts/install.ps1))) install
 ```
 
 Runs in the background from the moment you log in. **No administrator rights** —
 it registers a scheduled task under your own account, not a system service.
 
-<sub>If PowerShell refuses the file, that is the execution policy, not a
-permission problem: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`</sub>
+<sub>Use `install.cmd`, not `install.ps1`. Windows blocks unsigned PowerShell
+script files by default, so running the `.ps1` directly fails with *"running
+scripts is disabled on this system"*. The `.cmd` is a two-line launcher that
+passes <code>-ExecutionPolicy&nbsp;Bypass</code> for that one run — it changes
+nothing on your machine and still needs no admin. The one-liner above sidesteps
+it differently, by never writing a script file at all.</sub>
 
 ### Just try it, install nothing
 
@@ -60,7 +70,7 @@ The installer prints the address when it is done. Open it on your phone and add
 it to the home screen — it behaves like an app from there.
 
 Same three commands on either platform — `install.sh` on Linux and macOS,
-`install.ps1` on Windows:
+`install.cmd` on Windows:
 
 | | |
 | --- | --- |

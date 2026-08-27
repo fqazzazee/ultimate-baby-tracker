@@ -5,6 +5,18 @@
 .DESCRIPTION
   Everything here runs as you, with no administrator rights and no UAC prompt.
 
+  Run it through install.cmd, which is next to this file:
+
+      scripts\install.cmd install
+
+  PowerShell refuses to run unsigned script files by default - the execution
+  policy is Restricted for a standard user, and a .ps1 that came from the
+  internet carries a mark-of-the-web that even RemoteSigned rejects. The .cmd
+  launcher passes -ExecutionPolicy Bypass, which lifts both for that one
+  invocation, changes nothing on the machine, and needs no admin rights.
+
+  Calling this file directly works too, once the policy allows it.
+
   Windows Services proper do need admin, so the "service" here is a per-user
   Scheduled Task that starts at logon and restarts itself if it falls over.
   That is the same thing in practice for a machine you log into, and it is the
@@ -14,11 +26,11 @@
   touch them, and every update snapshots them first anyway.
 
 .EXAMPLE
-  .\install.ps1 install
-  .\install.ps1 update
-  .\install.ps1 service add
-  .\install.ps1 service remove
-  .\install.ps1 status
+  .\install.cmd install
+  .\install.cmd update
+  .\install.cmd service add
+  .\install.cmd service remove
+  .\install.cmd status
 #>
 
 [CmdletBinding()]
@@ -355,14 +367,14 @@ function Show-Usage {
   Say @"
 $AppName - installer and service manager (no administrator rights needed)
 
-  .\install.ps1 install              install, then run it in the background
-  .\install.ps1 update               fetch the latest revision and restart
-  .\install.ps1 service add          create (or recreate) the logon task
-  .\install.ps1 service remove       stop and delete the task, keep everything else
-  .\install.ps1 uninstall [-Purge]   remove the app; -Purge deletes your entries too
-  .\install.ps1 status               where things are and whether it is running
-  .\install.ps1 start|stop|restart
-  .\install.ps1 logs                 tail the service log
+  .\install.cmd install              install, then run it in the background
+  .\install.cmd update               fetch the latest revision and restart
+  .\install.cmd service add          create (or recreate) the logon task
+  .\install.cmd service remove       stop and delete the task, keep everything else
+  .\install.cmd uninstall [-Purge]   remove the app; -Purge deletes your entries too
+  .\install.cmd status               where things are and whether it is running
+  .\install.cmd start|stop|restart
+  .\install.cmd logs                 tail the service log
 
 Options
   -Port N            default $Port
@@ -378,8 +390,14 @@ Windows Services proper need administrator rights, so this registers a per-user
 Scheduled Task that starts at logon instead. It runs as you, in the background,
 with no console window, and restarts itself if it falls over.
 
-If PowerShell refuses to run this file, it is the execution policy, not a
-permission problem. For the current user only:
+install.cmd is the launcher: PowerShell blocks unsigned script files by
+default, and it passes -ExecutionPolicy Bypass for that one run so nothing on
+the machine has to change. To call this .ps1 directly instead, either use
+
+  powershell -ExecutionPolicy Bypass -File .\install.ps1 install
+
+or permit local scripts once, for your account only:
+
   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 "@
 }
