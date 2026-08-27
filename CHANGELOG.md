@@ -3,6 +3,31 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.4.1 — 2026-08-27
+
+### Documentation
+
+- **The README is short again** — 446 lines down to 113. It now covers what the
+  tool is, how to install it on each platform in three commands, what the five
+  screens do, and where your data lives. Everything else moved rather than went:
+  - **[SECURITY.md](SECURITY.md)** — the security notice, what a 4-digit PIN
+    actually is, why a backup file is as sensitive as the data folder, and the
+    worked reverse-proxy setup.
+  - **[docs/manual.md](docs/manual.md)** — every screen in detail, tracked
+    metrics, nutrition, statistics, alarms, custom buttons, backup and restore,
+    the data files, the HTTP API.
+  - **[docs/install.md](docs/install.md)** — the full installer reference: every
+    flag, where things land on each platform, and what an update does.
+- Install instructions are per-platform and copy-pasteable, including a
+  `curl … | bash` one-liner and the Node prerequisite for Fedora, Debian,
+  macOS and Windows.
+
+### Fixed
+
+- `install.sh` printed unrunnable hints when piped from `curl`, because `$0` is
+  `bash` there — every "run this next" line said `bash update`. It names the
+  script properly now, and the piped path is tested end to end.
+
 ## 1.4.0 — 2026-08-27
 
 ### Install it as a service
