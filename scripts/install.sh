@@ -2,12 +2,15 @@
 #
 # Ultimate Baby Tracker — installer and service manager for Linux and macOS.
 #
-#   ./install.sh install            install and start it as a service
-#   ./install.sh update             fetch the latest revision and restart
-#   ./install.sh service add        (re)create the service
-#   ./install.sh service remove     stop and delete the service, keep the data
-#   ./install.sh uninstall          remove the app; --purge also removes the data
-#   ./install.sh status | logs | start | stop | restart
+#   ./scripts/install.sh install          install and start it as a service
+#   ./scripts/install.sh update           fetch the latest revision and restart
+#   ./scripts/install.sh service add      (re)create the service
+#   ./scripts/install.sh service remove   stop and delete the service, keep the data
+#   ./scripts/install.sh uninstall        remove the app; --purge also drops the data
+#   ./scripts/install.sh status | logs | start | stop | restart
+#
+# It also works piped straight from curl, in which case it clones the repo for
+# you:  curl -fsSL <raw-url>/scripts/install.sh | bash -s -- install
 #
 # On Linux this installs a *user* systemd unit, which needs no root at all.
 # Pass --system to install a machine-wide unit instead (that one does need
@@ -49,6 +52,12 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
 else
   B=''; DIM=''; RED=''; GRN=''; YEL=''; R=''
 fi
+
+# Piped from curl, $0 is "bash", so the hints have to name something runnable.
+case "${0##*/}" in
+  bash|sh|-bash|-sh|"") SELF="./scripts/install.sh" ;;
+  *) SELF="$0" ;;
+esac
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '%s==>%s %s\n' "$B" "$R" "$*"; }
@@ -314,7 +323,7 @@ do_install() {
   say ""
   say "  ${DIM}app  $APP_DIR${R}"
   say "  ${DIM}data $DATA_DIR${R}"
-  say "  ${DIM}update later with: $0 update${R}"
+  say "  ${DIM}update later with: $SELF update${R}"
 }
 
 do_update() {
@@ -386,14 +395,14 @@ usage() {
   cat <<USAGE
 ${B}$APP_NAME${R} — installer and service manager
 
-  ${B}$0 install${R}              install, then run it as a service
-  ${B}$0 update${R}               fetch the latest revision and restart
-  ${B}$0 service add${R}          create (or recreate) the service
-  ${B}$0 service remove${R}       stop and delete the service, keep everything else
-  ${B}$0 uninstall${R} [--purge]  remove the app; --purge deletes your entries too
-  ${B}$0 status${R}               where things are and whether it is running
-  ${B}$0 start|stop|restart${R}
-  ${B}$0 logs${R} [-f]            service log
+  ${B}$SELF install${R}              install, then run it as a service
+  ${B}$SELF update${R}               fetch the latest revision and restart
+  ${B}$SELF service add${R}          create (or recreate) the service
+  ${B}$SELF service remove${R}       stop and delete the service, keep everything else
+  ${B}$SELF uninstall${R} [--purge]  remove the app; --purge deletes your entries too
+  ${B}$SELF status${R}               where things are and whether it is running
+  ${B}$SELF start|stop|restart${R}
+  ${B}$SELF logs${R} [-f]            service log
 
 Options
   --system            machine-wide service under a dedicated account (needs root)
