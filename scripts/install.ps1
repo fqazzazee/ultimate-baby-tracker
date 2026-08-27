@@ -60,7 +60,13 @@ $TaskName    = 'UltimateBabyTracker'
 $RepoUrl     = 'https://github.com/fqazzazee/ultimate-baby-tracker'
 $MinNodeMajor = 18
 
-$root      = Join-Path $env:LOCALAPPDATA 'UltimateBabyTracker'
+# Always set on Windows; if it is not, say why rather than letting Join-Path
+# fail with "Cannot bind argument to parameter 'Path' because it is null".
+$localAppData = $env:LOCALAPPDATA
+if (-not $localAppData) { $localAppData = Join-Path $HOME '.local/share' }
+if (-not $localAppData) { throw 'Cannot work out where to install: neither LOCALAPPDATA nor HOME is set.' }
+
+$root      = Join-Path $localAppData 'UltimateBabyTracker'
 $AppDir    = if ($Dir)  { $Dir }  else { Join-Path $root 'app' }
 $DataDir   = if ($Data) { $Data } else { Join-Path $root 'data' }
 # Snapshots live beside the data they protect, so moving the data moves them.
@@ -80,6 +86,63 @@ function Warn { param([string]$m) Write-Host "  ! $m" -ForegroundColor Yellow }
 function Die  { param([string]$m) Write-Host "error: $m" -ForegroundColor Red; exit 1 }
 function Have { param([string]$c) [bool](Get-Command $c -ErrorAction SilentlyContinue) }
 
+<# The ScheduledTasks module ships with Windows; anywhere else there is no task. #>
+function Have-Tasks { Have 'Get-ScheduledTask' }
+function Get-Task {
+  if (-not (Have-Tasks)) { return $null }
+  return Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+
+<#
+  Run an external program and judge it by its exit code.
+
+  Native programs write ordinary progress to stderr - git announces "Cloning
+  into ..." there, and so does every fetch - and with $ErrorActionPreference set
+  to 'Stop' PowerShell turns any of that into a terminating NativeCommandError.
+  The command has not failed; it has merely spoken. So stderr is captured as
+  plain text here and only $LASTEXITCODE decides whether anything went wrong,
+  with the captured text kept for the error message when it did.
+#>
+function Invoke-Native {
+  param(
+    [Parameter(Mandatory)][string]$File,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
+  )
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $lines = & $File @Arguments 2>&1 | ForEach-Object { "$_" }
+    return [pscustomobject]@{
+      Code   = $LASTEXITCODE
+      Lines  = @($lines)
+      Text   = ($lines -join [Environment]::NewLine)
+    }
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
+<#
+  One line of output from a command expected to succeed; '' if it did not.
+
+  This one discards stderr rather than merging it, so a stray git warning can
+  never be mistaken for the value being read. Safe because the preference is
+  Continue for the duration: no error record is manufactured to discard.
+#>
+function Native-Line {
+  param([Parameter(Mandatory)][string]$File,
+        [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $out = & $File @Arguments 2>$null
+    if ($LASTEXITCODE -ne 0) { return '' }
+    return (@($out) | Where-Object { "$_" -ne '' } | Select-Object -First 1)
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
 # ------------------------------------------------------------------- checks --
 
 function Get-NodePath {
@@ -92,7 +155,8 @@ Node.js is not installed, or is not on PATH. Node $MinNodeMajor or newer is requ
   Or download the .zip:  https://nodejs.org/en/download  (unzip, add to PATH)
 "@
   }
-  $version = (& node -p 'process.versions.node' 2>$null)
+  $version = Native-Line -File 'node' -Arguments @('-p', 'process.versions.node')
+  if (-not $version) { Die "Could not ask Node for its version. Is '$($node.Source)' working?" }
   $major = [int]($version -split '\.')[0]
   if ($major -lt $MinNodeMajor) {
     Die "Node $version is too old; this needs $MinNodeMajor or newer."
@@ -111,11 +175,17 @@ function Get-Source {
 
   if (Test-Path (Join-Path $Dest '.git')) {
     Step 'Updating the existing checkout'
-    & git -C $Dest remote set-url origin $RepoUrl
-    & git -C $Dest fetch --depth 1 origin $Branch  2>&1 | Out-Null
-    & git -C $Dest checkout -q -B $Branch "origin/$Branch"
-    & git -C $Dest reset --hard -q "origin/$Branch"
-    Ok ("At " + (& git -C $Dest rev-parse --short HEAD) + " on $Branch")
+    $steps = @(
+      @('remote', 'set-url', 'origin', $RepoUrl),
+      @('fetch', '--depth', '1', 'origin', $Branch),
+      @('checkout', '-q', '-B', $Branch, "origin/$Branch"),
+      @('reset', '--hard', '-q', "origin/$Branch")
+    )
+    foreach ($step in $steps) {
+      $r = Invoke-Native -File 'git' -Arguments (@('-C', $Dest) + $step)
+      if ($r.Code -ne 0) { Die "git $($step -join ' ') failed:`n$($r.Text)" }
+    }
+    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')) + " on $Branch")
     return
   }
 
@@ -125,9 +195,9 @@ function Get-Source {
   if (Have git) {
     Step "Cloning $RepoUrl ($Branch)"
     if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-    & git clone --depth 1 --branch $Branch $RepoUrl $Dest 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Die "Could not clone $RepoUrl. Check the network, or the branch name." }
-    Ok ("At " + (& git -C $Dest rev-parse --short HEAD))
+    $r = Invoke-Native -File 'git' -Arguments @('clone', '--depth', '1', '--branch', $Branch, $RepoUrl, $Dest)
+    if ($r.Code -ne 0) { Die "Could not clone $RepoUrl (branch $Branch):`n$($r.Text)" }
+    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')))
     return
   }
 
@@ -164,7 +234,8 @@ function Get-InstalledVersion {
 
 function Get-Revision {
   if (Test-Path (Join-Path $AppDir '.git')) {
-    return (& git -C $AppDir rev-parse --short HEAD 2>$null)
+    $rev = Native-Line -File 'git' -Arguments @('-C', $AppDir, 'rev-parse', '--short', 'HEAD')
+    if ($rev) { return $rev }
   }
   return 'unknown'
 }
@@ -200,7 +271,7 @@ function Write-Shim {
 
   @"
 @echo off
-rem Generated by install.ps1 - do not edit; run 'install.ps1 service add' instead.
+rem Generated by install.ps1 - do not edit; run 'install.cmd service add' instead.
 set "BT_PORT=$Port"
 set "BT_HOST=$Listen"
 set "BT_DATA_DIR=$DataDir"
@@ -217,6 +288,9 @@ CreateObject("WScript.Shell").Run """$CmdShim""", 0, False
 }
 
 function Add-Service {
+  if (-not (Have-Tasks)) {
+    Die 'Scheduled tasks are not available here, so there is no background service to register. Install with -NoService and start it yourself.'
+  }
   $node = Get-NodePath
   Assert-App
   Step 'Registering the logon task'
@@ -243,7 +317,7 @@ function Add-Service {
 function Remove-Service {
   Step 'Removing the logon task'
   Stop-App
-  if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+  if (Get-Task) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     Ok "Task '$TaskName' removed"
   } else {
@@ -253,33 +327,43 @@ function Remove-Service {
   Ok 'The app and your data are untouched.'
 }
 
+<#
+  Process ids of the copy running out of *this* install directory, so a second
+  tracker elsewhere on the machine is never stopped by mistake.
+
+  CIM is the Windows way to read another process's command line; Get-Process
+  grew a CommandLine property in PowerShell 7 and covers everywhere else.
+#>
 function Get-AppProcess {
-  # Only ever match the copy running out of this install directory.
   $target = (Join-Path $AppDir 'server.js')
-  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($target) }
+  if (Have 'Get-CimInstance') {
+    return @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -and $_.CommandLine.Contains($target) } |
+      ForEach-Object { $_.ProcessId })
+  }
+  return @(Get-Process -Name 'node' -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($target) } |
+    ForEach-Object { $_.Id })
 }
 
 function Stop-App {
-  if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  }
-  foreach ($p in Get-AppProcess) {
-    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+  if (Get-Task) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+  foreach ($processId in Get-AppProcess) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
   }
 }
 
 function Show-Where {
   if (Get-AppProcess) {
     Ok "Running at http://localhost:$Port"
-    if ($Listen -eq '0.0.0.0') {
+    if ($Listen -eq '0.0.0.0' -and (Have 'Get-NetIPAddress')) {
       $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
              Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } |
              Select-Object -First 1).IPAddress
       if ($ip) { Say "    On your phone: http://${ip}:$Port" }
     }
   } else {
-    Warn "Not running. See: .\install.ps1 logs"
+    Warn "Not running. See: .\install.cmd logs"
   }
 }
 
@@ -296,14 +380,14 @@ function Invoke-Install {
   if ($NoService) {
     Say ''
     Ok 'Installed. Start it with:'
-    Say "    `$env:BT_DATA_DIR='$DataDir'; `$env:BT_PORT=$Port; node '$AppDir\server.js'"
+    Say "    `$env:BT_DATA_DIR='$DataDir'; `$env:BT_PORT=$Port; node '$(Join-Path $AppDir 'server.js')'"
   } else {
     Add-Service
   }
   Say ''
   Say "  app  $AppDir"
   Say "  data $DataDir"
-  Say "  update later with: .\install.ps1 update"
+  Say "  update later with: .\install.cmd update"
 }
 
 function Invoke-Update {
@@ -333,7 +417,8 @@ function Invoke-Update {
   } else {
     Ok "Updated $before -> $after"
     if (Test-Path (Join-Path $AppDir '.git')) {
-      & git -C $AppDir --no-pager log --oneline "$before..$after" 2>$null | Select-Object -First 10
+      (Invoke-Native -File 'git' -Arguments @('-C', $AppDir, '--no-pager', 'log', '--oneline', "$before..$after")).Lines |
+        Select-Object -First 10 | ForEach-Object { Say "    $_" }
     }
   }
   if ($wasRunning) { Show-Where }
@@ -357,7 +442,7 @@ function Invoke-Status {
   Say "  app     $AppDir  ($(Get-Revision))"
   Say "  data    $DataDir"
   Say "  version $(if (Get-InstalledVersion) { Get-InstalledVersion } else { 'not installed' })"
-  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  $task = Get-Task
   Say "  task    $(if ($task) { "$TaskName ($($task.State))" } else { 'not registered' })"
   Say "  log     $LogFile"
   Show-Where
