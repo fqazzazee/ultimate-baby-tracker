@@ -3,6 +3,28 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.4.4 — 2026-08-27
+
+### Documentation
+
+- **A product slide at the top of the README** — the Track screen on a laptop
+  and a phone, a month of intake in Stats, and the formula profiles in Setup,
+  with the pitch beside them. Every screenshot is the app itself, filled with
+  generated demo data; no real entries are in this repository.
+- The slide is a page rather than a picture: **[`docs/slide/index.html`](docs/slide/index.html)**
+  is a 1600x900 stage sized entirely in one CSS unit, so it scales to whatever
+  it is opened in. Edit the copy in the markup, the palette in the `:root`
+  block, or swap a screenshot in `docs/slide/assets/`.
+- **New `scripts/render-slide.mjs`** redraws `docs/slide/slide.png` — the image
+  the README shows — from that page. It drives a headless Chrome over the
+  DevTools protocol, so it needs a browser already on the machine and nothing
+  from npm. Point `CHROME` at one if it is somewhere unusual, and `--width`
+  sets the size of the PNG.
+
+  GitHub strips `<style>`, `<script>` and iframes from Markdown, so a README
+  cannot render live HTML; the rendered PNG is what it shows, and the page is
+  what you edit.
+
 ## 1.4.3 — 2026-08-27
 
 ### Fixed
