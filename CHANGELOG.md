@@ -3,6 +3,45 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.4.0 — 2026-08-27
+
+### Install it as a service
+
+- `scripts/install.sh` for Linux and macOS, `scripts/install.ps1` for Windows.
+  Both handle `install`, `update`, `service add`, `service remove`, `status`,
+  `start`/`stop`/`restart`, `logs` and `uninstall`. **Neither needs
+  administrator rights.**
+- On Linux the service is a **systemd user unit** in `~/.config/systemd/user/`,
+  which no root can be asked for. Lingering is enabled so it survives a logout
+  and starts at boot; where the policy refuses, the script says so and prints
+  the one command that fixes it. `--system` installs a machine-wide unit under
+  its own unprivileged account, hardened with `ProtectSystem=strict` and
+  `ReadWritePaths` limited to the data directory. Both units pass
+  `systemd-analyze verify`.
+- On Windows a real Service needs administrator rights, so the installer
+  registers a **per-user Scheduled Task** that starts at logon and restarts on
+  failure. A small `.cmd` sets the environment and redirects the log, and a
+  one-line `.vbs` starts it with no console window — quoting stays in the batch
+  file, where it behaves.
+- `update` snapshots the data directory, stops the service, fast-forwards to the
+  latest revision on the branch, rewrites the unit or launcher in case the Node
+  path moved, restarts, and prints the commits it pulled in. The last ten
+  snapshots are kept.
+- Your entries never live inside the application directory, so an update cannot
+  reach them in the first place. The snapshot is belt and braces.
+- Where git is present the app is a shallow clone and updating is a fetch;
+  without it the installer falls back to the branch archive and says that
+  updates will re-download the lot.
+- The installer refuses to install under `/tmp` unless told twice: it is cleared
+  on reboot, and the app — and possibly the entries — would go with it.
+- Once a unit exists it is the record of the port, host and paths, so `status`,
+  `restart` and `update` need no flags repeated at them and cannot report a port
+  the service is not actually on.
+- The user unit deliberately omits `PrivateTmp`. It gives the unit its own
+  `/tmp` namespace, which hides the application directory from itself and fails
+  as a baffling `200/CHDIR`; the system unit, which installs to `/opt`, keeps
+  it.
+
 ## 1.3.4 — 2026-08-27
 
 ### Charts

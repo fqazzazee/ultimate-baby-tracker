@@ -45,6 +45,75 @@ BT_PORT=3000 BT_DATA_DIR=/srv/baby node server.js
 Open `http://<your-computer's-IP>:8477` on a phone and add it to the home
 screen — it installs as a standalone app.
 
+## Install it as a service
+
+`scripts/` has an installer for each platform. Both put the app in one place,
+your entries in another, and can update themselves from this repository later.
+**Neither needs administrator rights.**
+
+### Linux and macOS
+
+```bash
+./scripts/install.sh install          # install, then run it in the background
+./scripts/install.sh update           # pull the latest revision and restart
+./scripts/install.sh status           # where things are, and is it up
+./scripts/install.sh service remove   # stop it, keep everything
+./scripts/install.sh uninstall        # remove the app; --purge drops the data too
+```
+
+On Linux this writes a **systemd user unit** to
+`~/.config/systemd/user/`, which needs no root — tested on Fedora. It enables
+lingering so the service survives a logout and starts at boot; if the policy
+refuses, the script says so and prints the one command that fixes it. Add
+`--system` for a machine-wide unit running under its own unprivileged account
+(that one does need root, and is hardened with `ProtectSystem=strict`).
+
+Without systemd — macOS, a container, a distro that went its own way — install
+still works and just tells you the command to run it with.
+
+| Option | |
+| --- | --- |
+| `--port N` `--host ADDR` | defaults `8477` and `0.0.0.0`; `127.0.0.1` keeps it off the network |
+| `--dir` `--data` `--backups` | where the app, your entries and the update snapshots go |
+| `--branch NAME` | track a branch other than `main` |
+| `--system` | machine-wide unit instead of a user one |
+| `--no-service` | install the files, skip the service |
+
+### Windows
+
+```powershell
+.\scripts\install.ps1 install
+.\scripts\install.ps1 update
+.\scripts\install.ps1 status
+.\scripts\install.ps1 service remove
+```
+
+A real Windows Service needs administrator rights, so this registers a **per-user
+Scheduled Task** that starts at logon instead, running as you with no console
+window and restarting itself if it falls over. For a machine you log into, that
+is the same thing in practice, and it is the only kind of background job an
+unprivileged account is allowed to create.
+
+If PowerShell refuses to run the file, that is the execution policy rather than
+a permission problem:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+### What updating does, and does not, touch
+
+Your entries never live inside the application directory, so an update cannot
+reach them. Before one, the installer snapshots the whole data directory to
+`backups/` anyway and keeps the last ten. The update itself stops the service,
+fast-forwards the checkout to the latest revision on the branch, rewrites the
+unit or launcher in case the Node path moved, and starts it again — then prints
+the commits it pulled in.
+
+Where git is installed the app is a shallow clone, so updating is a fetch and
+you can see exactly what changed. Where it is not, the installer falls back to
+downloading the branch archive and says that updates will re-download the lot.
+
 > No authentication, no encryption — see the [security notice](#security-notice).
 > Put it behind a reverse proxy on a segmented network.
 
