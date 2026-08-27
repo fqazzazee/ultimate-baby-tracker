@@ -35,9 +35,35 @@
   --radius-lg: 30px;
   --tap: 60px;
 
+  /* Spacing scale, in rem so every gap grows with the reader's text size -
+     turn the browser's font size up and the boxes breathe instead of
+     colliding. Radii and minimum tap targets stay in px on purpose: one is
+     decoration, the other is a physical finger, and neither is typography. */
+  --sp-1: 0.25rem;   /*  4px */
+  --sp-2: 0.5rem;    /*  8px */
+  --sp-3: 0.75rem;   /* 12px */
+  --sp-4: 1rem;      /* 16px */
+  --sp-5: 1.5rem;    /* 24px */
+  --sp-6: 2.5rem;    /* 40px */
+
+  /* What each one is for, so the rhythm is stated once rather than guessed at
+     in forty places - and changing it is one line. */
+  --pad-page: var(--sp-4);     /* page gutter */
+  --pad-card: var(--sp-4);     /* inside a card */
+  --gap-card: var(--sp-4);     /* between cards and boxes */
+  --gap-row: var(--sp-2);      /* between rows of a list */
+  --gap-tile: var(--sp-2);     /* between tiles in a grid */
+  --gap-section: var(--sp-5);  /* above a section heading */
+
   --danger: #d9534f;
   --danger-soft: rgba(217, 83, 79, 0.12);
   --ok: #3fa87a;
+
+  /* Chart series. Deliberately not the nursery pastels above: those are far too
+     pale to read as data. These two are stepped per theme and checked for
+     colour-vision separation against this theme's card surface. */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
 
   color-scheme: light;
 }
@@ -72,6 +98,9 @@
   --danger-soft: rgba(255, 128, 121, 0.15);
   --ok: #5fd3a3;
 
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+
   color-scheme: dark;
 }
 
@@ -86,7 +115,7 @@ body {
   color: var(--text);
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
-  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom));
 }
 
 /* Soft nursery blobs behind everything. */
@@ -107,14 +136,18 @@ h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 
-.wrap { width: min(760px, 100%); margin: 0 auto; padding: 0 14px; }
+.wrap { width: min(760px, 100%); margin: 0 auto; padding: 0 var(--pad-page); }
 .muted { color: var(--muted); }
 .small { font-size: 0.82rem; }
-.row { display: flex; align-items: center; gap: 10px; }
+.row { display: flex; align-items: center; gap: var(--sp-3); }
 .row.wrap-row { flex-wrap: wrap; }
 .spacer { flex: 1; }
 .center { text-align: center; }
 .hidden { display: none !important; }
+
+/* The header is sticky, so the first card would otherwise start hard against
+   its lower edge. This is the gap that keeps them apart. */
+#view { display: block; padding-top: var(--sp-4); }
 
 /* ------------------------------------------------------------------ top bar */
 
@@ -123,12 +156,16 @@ button { cursor: pointer; }
   top: 0;
   z-index: 30;
   backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  /* Opaque enough that a card scrolling underneath does not read through it. */
+  background: color-mix(in srgb, var(--bg) 93%, transparent);
   border-bottom: 1px solid var(--line);
   padding-top: env(safe-area-inset-top);
 }
 
-.topbar-inner { display: flex; align-items: center; gap: 8px; padding: 7px 12px 3px; }
+.topbar-inner {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3) 0;
+}
 
 .brand {
   display: flex; align-items: baseline; gap: 7px;
@@ -152,21 +189,54 @@ button { cursor: pointer; }
 }
 
 .icon-btn {
-  width: 44px; height: 44px;
+  width: max(40px, 2.4em); height: max(40px, 2.4em);
   flex: 0 0 auto;
   display: grid; place-items: center;
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: 50%;
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   box-shadow: var(--shadow-sm);
-  transition: transform .12s ease, background .2s ease;
+  transition: width .18s ease, height .18s ease, font-size .18s ease,
+              transform .12s ease, background .2s ease;
 }
 .icon-btn:active { transform: scale(0.92); }
 
+/*
+ * Once you have scrolled past the first screenful the header stops being the
+ * headline and starts being in the way, so it gives a row back: the brand
+ * shrinks, the version drops, and the tabs turn from stacked to side by side.
+ * Scroll back to the top and it returns. Heights are transitioned rather than
+ * snapped, and a ResizeObserver in app.js keeps --header-h in step so the
+ * sticky day headings stay glued to the bottom edge throughout.
+ */
+.topbar.compact .topbar-inner { padding-top: 0; }
+.topbar.compact .brand .logo { font-size: 1.05rem; }
+.topbar.compact .brand-name { font-size: 0.86rem; }
+.topbar.compact .brand .ver { display: none; }
+.topbar.compact .icon-btn { width: max(32px, 2.2em); height: max(32px, 2.2em); font-size: 0.95rem; }
+.topbar.compact .tabbar button {
+  flex-direction: row; gap: var(--sp-2);
+  min-height: max(36px, 2.4em);
+  padding: 0.25em var(--sp-1);
+  font-size: 0.74rem;
+}
+.topbar.compact .tabbar button .ico { font-size: 1.35em; }
+.topbar.compact .chip.mini {
+  min-height: max(30px, 2.1em);
+  padding: 0 var(--sp-2);
+  font-size: 0.76rem;
+}
+.topbar.compact .chip.mini .avatar { font-size: 0.95rem; }
+.topbar.compact .ctx-div { height: 18px; }
+
+.brand .logo, .brand-name, .chip.mini, .chip.mini .avatar {
+  transition: font-size .18s ease, min-height .18s ease, padding .18s ease;
+}
+
 /* Horizontal scroller of baby / person chips. */
 .chip-strip {
-  display: flex; gap: 8px; overflow-x: auto; padding: 8px 14px;
+  display: flex; gap: var(--sp-2); overflow-x: auto; padding: var(--sp-2) var(--pad-page);
   scrollbar-width: none;
 }
 .chip-strip::-webkit-scrollbar { display: none; }
@@ -175,10 +245,10 @@ button { cursor: pointer; }
    room, chips wrapping under the tabs on a phone. */
 .navbar {
   display: flex; flex-wrap: wrap; align-items: center;
-  gap: 4px 12px;
-  padding: 0 10px 6px;
+  gap: var(--sp-1) var(--sp-3);
+  padding: 0 var(--sp-2) var(--sp-1);
 }
-.navbar .tabbar { flex: 1 1 300px; padding: 0; }
+.navbar .tabbar { flex: 1 1 340px; padding: 0; }
 
 .ctx-strip {
   flex: 1 1 auto;
@@ -200,8 +270,8 @@ button { cursor: pointer; }
 
 .chip {
   flex: 0 0 auto;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 14px;
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   min-height: 46px;
   border-radius: 999px;
   border: 2px solid var(--line);
@@ -219,9 +289,9 @@ button { cursor: pointer; }
 .chip .sub { font-weight: 600; font-size: 0.75rem; color: var(--muted); }
 
 .chip.mini {
-  gap: 6px;
-  padding: 5px 11px;
-  min-height: 38px;
+  gap: var(--sp-2);
+  padding: 0.3em var(--sp-3);
+  min-height: max(36px, 2.6em);
   border-width: 2px;
   font-size: 0.82rem;
 }
@@ -234,13 +304,13 @@ button { cursor: pointer; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 16px;
-  margin-bottom: 14px;
+  padding: var(--pad-card);
+  margin-bottom: var(--gap-card);
 }
 
 .section-title {
-  display: flex; align-items: center; gap: 8px;
-  margin: 20px 4px 10px;
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin: var(--gap-section) var(--sp-1) var(--sp-3);
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -249,7 +319,7 @@ button { cursor: pointer; }
 }
 
 /* Baby hero summary */
-.hero { display: flex; align-items: center; gap: 14px; }
+.hero { display: flex; align-items: center; gap: var(--sp-3); }
 .hero .face {
   width: 62px; height: 62px; flex: 0 0 auto;
   display: grid; place-items: center;
@@ -262,14 +332,14 @@ button { cursor: pointer; }
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
-  gap: 8px;
-  margin-top: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(3.75rem, 1fr));
+  gap: var(--gap-tile);
+  margin-top: var(--sp-4);
 }
 .stat {
   background: var(--surface-2);
   border-radius: var(--radius-sm);
-  padding: 10px 8px;
+  padding: var(--sp-3) var(--sp-2);
   text-align: center;
 }
 .stat .v { font-size: 1.25rem; font-weight: 900; line-height: 1.15; }
@@ -284,10 +354,10 @@ button { cursor: pointer; }
   border-left: 6px solid var(--tone);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 14px 14px 12px;
-  margin-bottom: 12px;
+  padding: var(--pad-card);
+  margin-bottom: var(--gap-card);
 }
-.type-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.type-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
 .type-head .emoji {
   width: 44px; height: 44px; flex: 0 0 auto;
   display: grid; place-items: center;
@@ -298,7 +368,7 @@ button { cursor: pointer; }
 .type-head .label { font-weight: 900; font-size: 1.05rem; }
 .type-head .since { font-size: 0.78rem; color: var(--muted); font-weight: 700; }
 
-.preset-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.preset-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 
 /* The big one-tap buttons. */
 .tap {
@@ -345,8 +415,8 @@ button { cursor: pointer; }
   background: linear-gradient(140deg, color-mix(in srgb, var(--tone) 30%, var(--surface)), var(--surface));
   border: 2px solid color-mix(in srgb, var(--tone) 50%, var(--surface));
   border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: var(--sp-3) var(--pad-card);
+  margin-bottom: var(--gap-card);
   box-shadow: var(--shadow-sm);
 }
 .timer-card .clock { font-size: 1.7rem; font-weight: 900; font-variant-numeric: tabular-nums; }
@@ -355,8 +425,8 @@ button { cursor: pointer; }
 
 .day-head {
   position: sticky; top: var(--header-h, 120px);
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 10px 4px 6px;
+  display: flex; align-items: baseline; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-1) var(--sp-2);
   font-weight: 900;
   background: linear-gradient(var(--bg) 62%, transparent);
   z-index: 5;
@@ -368,8 +438,8 @@ button { cursor: pointer; }
   border: 1px solid var(--line);
   border-left: 5px solid var(--tone, var(--pink));
   border-radius: var(--radius-sm);
-  padding: 11px 12px;
-  margin-bottom: 8px;
+  padding: var(--sp-3);
+  margin-bottom: var(--gap-row);
   box-shadow: var(--shadow-sm);
 }
 .entry .ico {
@@ -410,8 +480,8 @@ button { cursor: pointer; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 14px;
-  margin-bottom: 12px;
+  padding: var(--pad-card);
+  margin-bottom: var(--gap-card);
 }
 .alarm-card.due { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
 .countdown { font-size: 1.5rem; font-weight: 900; font-variant-numeric: tabular-nums; }
@@ -440,11 +510,11 @@ button { cursor: pointer; }
   50% { transform: rotate(1.1deg) scale(1.015); }
 }
 .ring-box .big { font-size: 3.6rem; line-height: 1; }
-.ring-actions { display: grid; gap: 10px; margin-top: 20px; }
+.ring-actions { display: grid; gap: var(--sp-2); margin-top: var(--sp-5); }
 
 /* -------------------------------------------------------------------- forms */
 
-label.field { display: block; margin-bottom: 12px; }
+label.field { display: block; margin-bottom: var(--sp-3); }
 label.field > .lab {
   display: block;
   font-size: 0.78rem; font-weight: 800; color: var(--muted);
@@ -497,7 +567,7 @@ input:focus, select:focus, textarea:focus {
   justify-content: center;
 }
 .btn.stacked .small, .about-links .btn .small { font-weight: 600; }
-.btn-stack { display: grid; gap: 8px; }
+.btn-stack { display: grid; gap: var(--sp-2); }
 
 /* Big nursery-style toggle switch */
 .switch { display: flex; align-items: center; gap: 12px; padding: 12px 0; min-height: var(--tap); }
@@ -542,7 +612,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* Colour picker swatches */
-.swatch-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .swatch-opt {
   width: 54px; height: 54px;
   border-radius: 16px;
@@ -558,33 +628,38 @@ input:focus, select:focus, textarea:focus {
 
 .tabbar {
   display: flex;
-  gap: 4px;
-  padding: 0 10px 6px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2) var(--sp-1);
 }
 .tabbar button {
   flex: 1;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 7px 4px;
-  min-height: 54px;
+  min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 0.1em;
+  padding: 0.3em var(--sp-1);
+  /* em, with a px floor for the touch target: the slack inside a tab then
+     stays proportional to its label instead of shrinking away as text grows. */
+  min-height: max(44px, 3.3em);
   border: none; background: transparent;
   color: var(--muted);
-  font-size: 0.68rem; font-weight: 800;
+  font-size: 0.72rem; font-weight: 800;
   border-radius: 16px;
   position: relative;
-  transition: background .18s ease, color .18s ease;
+  transition: background .18s ease, color .18s ease,
+              min-height .18s ease, padding .18s ease, font-size .18s ease;
 }
-.tabbar button .ico { font-size: 1.35rem; line-height: 1; }
+/* em, so the icon and its label always keep the same relationship. */
+.tabbar button .ico { font-size: 1.7em; line-height: 1; transition: font-size .18s ease; }
 .tabbar button[aria-current='page'] {
   color: var(--text);
   background: var(--surface-2);
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--pink) 45%, transparent);
 }
 .tabbar .badge {
-  position: absolute; top: 2px; right: 22%;
-  min-width: 18px; height: 18px; padding: 0 5px;
+  position: absolute; top: 2px; right: 18%;
+  min-width: 1.5em; height: 1.5em; padding: 0 0.35em;
   border-radius: 999px;
   background: var(--danger); color: #fff;
-  font-size: 0.65rem; line-height: 18px;
+  font-size: 0.65rem; line-height: 1.5em; text-align: center;
 }
 
 /* ------------------------------------------------------------ sheet / modal */
@@ -602,7 +677,7 @@ input:focus, select:focus, textarea:focus {
   overflow-y: auto;
   background: var(--surface);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  padding: 10px 18px calc(24px + env(safe-area-inset-bottom));
+  padding: var(--sp-3) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
   box-shadow: var(--shadow-lg);
   animation: rise .26s cubic-bezier(.2, .9, .3, 1.1);
 }
@@ -612,8 +687,8 @@ input:focus, select:focus, textarea:focus {
   background: var(--line);
   margin: 6px auto 14px;
 }
-.sheet h3 { font-size: 1.15rem; margin-bottom: 12px; }
-.sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
+.sheet h3 { font-size: 1.15rem; margin-bottom: var(--sp-3); }
+.sheet-actions { display: flex; gap: var(--sp-3); margin-top: var(--sp-4); }
 .sheet-actions .btn { flex: 1; }
 
 /* -------------------------------------------------------------- about card */
@@ -628,13 +703,13 @@ input:focus, select:focus, textarea:focus {
     color-mix(in srgb, var(--sky) 30%, var(--surface)));
 }
 
-.about-links { display: grid; gap: 8px; margin: 14px 0 4px; }
+.about-links { display: grid; gap: var(--sp-2); margin: var(--gap-card) 0 var(--sp-1); }
 .about-links .btn { text-decoration: none; }
 
 /* Standing warning - deliberately hard to skim past. */
 .notice {
-  margin-top: 14px;
-  padding: 12px 14px;
+  margin-top: var(--gap-card);
+  padding: var(--sp-3) var(--pad-card);
   border-radius: var(--radius-sm);
   border: 2px solid color-mix(in srgb, var(--danger) 45%, transparent);
   background: var(--danger-soft);
@@ -733,15 +808,15 @@ input:focus, select:focus, textarea:focus {
   100% { transform: scale(1.05); opacity: 0; }
 }
 
-.empty { text-align: center; padding: 40px 16px; color: var(--muted); }
+.empty { text-align: center; padding: var(--sp-6) var(--pad-card); color: var(--muted); }
 .empty .big { font-size: 3rem; display: block; margin-bottom: 10px; }
 
 .list-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3);
   background: var(--surface-2);
   border-radius: var(--radius-sm);
-  margin-bottom: 8px;
+  margin-bottom: var(--gap-row);
 }
 .list-item .grow { flex: 1; min-width: 0; }
 
@@ -751,15 +826,208 @@ input:focus, select:focus, textarea:focus {
   text-align: center; padding: 4px; font-size: .78rem; font-weight: 800;
 }
 
+/* ------------------------------------------------------------------- charts */
+
+/* The Statistics headline row: wider tiles than the Track hero, because these
+   values carry a unit and a second line under them. */
+.stat-grid.kpi { grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); }
+.stat-grid.kpi .stat {
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 12px 8px;
+}
+.stat-grid.kpi .stat .v { font-size: 1.15rem; }
+.stat-grid.kpi .stat .k { margin-top: 3px; }
+
+.viz-filter {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3);
+  margin-bottom: var(--gap-card);
+}
+.viz-filter .seg { flex: 0 0 auto; }
+
+.viz-card { padding: var(--sp-3); }
+.viz-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.viz-head h3 { font-size: 1rem; }
+.viz-tools { display: flex; align-items: center; gap: var(--sp-2); flex: 0 0 auto; }
+.viz-head .btn.sm { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; }
+.icon-btn.sm { width: max(36px, 2.2em); height: max(36px, 2.2em); font-size: 0.95rem; }
+
+.viz-plot { margin: 4px -4px 0; }
+.viz { display: block; overflow: visible; touch-action: pan-y; }
+
+/* Gridlines and ticks stay one step off the surface: present, never loud. */
+.viz-grid { stroke: var(--line); stroke-width: 1; }
+.viz-tick { fill: var(--muted); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.viz-value { fill: var(--text); font-size: 11px; font-weight: 800; }
+.viz-ref { stroke: var(--muted); stroke-width: 1; opacity: 0.75; }
+.viz-ref-bg { fill: var(--surface); opacity: 0.88; }
+.viz-ref-label { fill: var(--muted); font-size: 10px; font-weight: 700; }
+
+.viz-mark { transition: opacity 0.12s ease; }
+.viz-mark.s1 { fill: var(--viz-1); }
+.viz-mark.s2 { fill: var(--viz-2); }
+.viz-hit { fill: transparent; }
+.viz-band { outline: none; }
+.viz-band:hover .viz-mark,
+.viz-band:focus-visible .viz-mark { opacity: 0.72; }
+.viz-band:focus-visible .viz-hit { fill: color-mix(in srgb, var(--text) 8%, transparent); }
+
+.viz-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 2px 0 var(--sp-2); }
+.viz-key { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+.viz-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.viz-dot.s1 { background: var(--viz-1); }
+.viz-dot.s2 { background: var(--viz-2); }
+
+/* The table twin - every value reachable without seeing colour or hovering. */
+.viz-table { margin-top: var(--sp-3); max-height: 320px; overflow: auto; }
+.viz-table table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.viz-table th, .viz-table td {
+  padding: var(--sp-2); text-align: right;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.viz-table thead th { position: sticky; top: 0; background: var(--surface); color: var(--muted); }
+.viz-table th[scope='row'],
+.viz-table thead th:first-child { text-align: left; }
+.viz-table th[scope='row'] { font-weight: 700; white-space: nowrap; }
+
+.viz-tip {
+  position: fixed; z-index: 400; pointer-events: none;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--text); color: var(--surface);
+  font-size: 0.78rem; font-weight: 700;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ nutrient grid */
+
+.nutrient-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.375rem, 1fr));
+  gap: 2px 12px;
+}
+.chk {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 44px;
+  font-size: 0.88rem; font-weight: 700;
+  cursor: pointer;
+}
+.chk input {
+  width: 22px; height: 22px; flex: 0 0 auto;
+  accent-color: var(--pink);
+  margin: 0;
+}
+
+/* ------------------------------------------------------- track, side by side */
+
+/*
+ * On a phone the three sections are plain blocks in source order - status,
+ * buttons, recent - which is the stack the screen has always had. Once there is
+ * room for three readable columns they line up instead, with `order` putting the
+ * buttons first so the thing you came to tap is nearest your thumb on the left.
+ */
+@media (min-width: 1080px) {
+  .wrap.track-cols {
+    width: min(1360px, 100%);
+    display: flex;
+    align-items: flex-start;
+    gap: 0 var(--sp-4);
+  }
+  .track-cols > section { flex: 1 1 0; min-width: 0; }
+  .track-cols .col-log { order: 1; }
+  .track-cols .col-status { order: 2; }
+  .track-cols .col-recent { order: 3; }
+  /* Columns start level: only the stacked layout needs the leading gap. */
+  .track-cols > section > .section-title:first-child { margin-top: 4px; }
+  /* A column is narrower than the full-width page, so the tap buttons take
+     their phone-sized basis again rather than the roomy 700px-and-up one -
+     otherwise three presets and the "..." button no longer share a row. */
+  .track-cols .preset-row .tap:not(.ghost) { flex: 1 1 72px; }
+  /* Likewise the hero's five figures: they fit across a narrow column at a
+     tighter minimum, rather than leaving the fifth stranded on its own row. */
+  .track-cols .stat-grid:not(.kpi) { grid-template-columns: repeat(auto-fit, minmax(3.25rem, 1fr)); }
+}
+
+/* --------------------------------------------------------------- nutrients */
+
+/* A stat tile that is also a button. */
+.stat.tappable {
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+}
+.stat.tappable:active { transform: scale(0.97); }
+.stat.tappable:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/*
+ * The intake meter. One hue, no severity colouring: this bar is a comparison
+ * with a population reference, and painting a short bar red would turn a
+ * description of well-fed babies into a verdict on one.
+ */
+.meter {
+  margin-top: var(--sp-3);
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--viz-1) 18%, var(--surface-2));
+  overflow: hidden;
+}
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--viz-1);
+}
+
+/* ------------------------------------------------------------------- hover */
+
+/*
+ * Boxes lift very slightly under the pointer. Guarded by `hover: hover` alone -
+ * that is what keeps a touchscreen from leaving a highlight stuck on the last
+ * thing tapped, while `pointer: fine` would also exclude the hybrid laptops
+ * that do have a mouse. The lift is a shadow and a border rather than a
+ * transform, which would nudge the text a fraction of a pixel and shimmer.
+ */
+@media (hover: hover) {
+  .card, .type-card, .timer-card, .alarm-card, .entry, .list-item, .stat {
+    transition: box-shadow .18s ease, border-color .18s ease, background .18s ease;
+  }
+  .card:hover, .viz-card:hover {
+    box-shadow: var(--shadow);
+    border-color: color-mix(in srgb, var(--muted) 30%, var(--line));
+  }
+  .type-card:hover, .timer-card:hover, .alarm-card:hover {
+    box-shadow: var(--shadow);
+    border-color: color-mix(in srgb, var(--tone, var(--pink)) 72%, var(--surface));
+  }
+  /* Rows you can actually click say so a little louder. */
+  .entry:hover, .list-item:hover {
+    box-shadow: var(--shadow);
+    border-color: color-mix(in srgb, var(--tone, var(--pink)) 55%, var(--line));
+    background: color-mix(in srgb, var(--tone, var(--pink)) 7%, var(--surface));
+  }
+  .list-item:hover { background: color-mix(in srgb, var(--text) 4%, var(--surface-2)); }
+  .stat:hover { background: color-mix(in srgb, var(--text) 6%, var(--surface-2)); }
+}
+
+/* Keyboard users get the same cue, on every device. */
+.entry:focus-visible, .list-item:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
 
 @media (min-width: 700px) {
-  .preset-row .tap { flex: 1 1 120px; }
+  .preset-row .tap:not(.ghost) { flex: 1 1 120px; }
   .navbar { width: min(980px, 100%); margin: 0 auto; flex-wrap: nowrap; }
   .navbar .tabbar { flex: 0 1 auto; }
   /* auto margin (not justify-content) so an overflowing strip stays scrollable */
   .ctx-strip { flex: 0 1 auto; margin-left: auto; }
-  .tabbar button { flex-direction: row; gap: 8px; font-size: 0.85rem; }
+  .tabbar button { flex-direction: row; gap: var(--sp-2); font-size: 0.85rem; }
 }

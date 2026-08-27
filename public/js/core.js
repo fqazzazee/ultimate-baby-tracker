@@ -19,6 +19,10 @@ export const state = {
   tab: store.get('tab', 'track'),
   historyType: 'all',
   historyDays: 7,
+  statsDays: store.get('statsDays', 14),
+  // The Statistics screen reads a longer window than /api/state carries, so it
+  // keeps its own slice of the log, fetched only while that tab is open.
+  stats: { days: 0, events: [], loading: true, error: null },
   connected: true,
   ringingKey: null,
 };
@@ -36,6 +40,14 @@ export const currentUser = () => userOf(config(), state.userId);
 
 let refreshing = null;
 
+/**
+ * Work that has to follow a successful refresh but cannot live in this module -
+ * the Statistics screen fetches its own, longer slice of the log, and importing
+ * it here would close an import cycle. app.js registers it at boot.
+ */
+const afterRefresh = [];
+export function onRefresh(fn) { afterRefresh.push(fn); }
+
 export async function refresh() {
   if (refreshing) return refreshing;
   refreshing = (async () => {
@@ -45,6 +57,9 @@ export async function refresh() {
       state.connected = true;
       reconcileSelections();
       applySettings();
+      for (const fn of afterRefresh) {
+        try { await fn(); } catch (err) { console.warn('[refresh hook]', err.message); }
+      }
       render();
     } catch (err) {
       state.connected = false;
@@ -381,7 +396,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
       </div>
     </label>
 
-    <div data-fields>${fieldsHTML(type, data)}</div>
+    <div data-fields>${fieldsHTML(type, data, cfg)}</div>
 
     <label class="field">
       <span class="lab">Note</span>

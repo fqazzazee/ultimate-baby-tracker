@@ -101,8 +101,20 @@ function optionName(o) {
   return typeof o === 'string' ? o : o.name;
 }
 
+/**
+ * Some fields draw their choices from the config rather than from a fixed list -
+ * `optionsFrom: 'milks'` follows whatever profiles exist in Setup -> Nutrition,
+ * so adding a formula there adds it to the bottle picker with no migration.
+ */
+export function resolveOptions(field, cfg) {
+  if (field.optionsFrom === 'milks') {
+    return (cfg?.nutrition?.milks || []).map((m) => ({ name: m.name, emoji: m.emoji }));
+  }
+  return field.options || [];
+}
+
 /** Render one editable field. Values are collected back by collectFields(). */
-export function fieldHTML(field, value) {
+export function fieldHTML(field, value, cfg = null) {
   const key = esc(field.key);
   const lab = esc(field.label || field.key);
   const showIf = field.showIf ? ` data-showif="${esc(field.showIf)}"` : '';
@@ -119,14 +131,15 @@ export function fieldHTML(field, value) {
       </div>`;
 
     case 'select': {
-      const opts = field.options || [];
+      const opts = resolveOptions(field, cfg);
       const cur = value ?? '';
       body = `<input type="hidden" data-field="${key}" data-kind="text" value="${esc(cur)}">
         <div class="preset-row" data-choices="${key}">
           ${opts.map((o) => {
             const name = optionName(o);
+            const lead = typeof o === 'object' && o.emoji ? `${esc(o.emoji)} ` : '';
             return `<button type="button" class="btn sm" data-choose="${key}" data-value="${esc(name)}"
-              aria-pressed="${name === cur}" style="${name === cur ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${esc(name)}</button>`;
+              aria-pressed="${name === cur}" style="${name === cur ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${lead}${esc(name)}</button>`;
           }).join('')}
           ${cur ? `<button type="button" class="btn sm" data-choose="${key}" data-value="">Clear</button>` : ''}
         </div>`;
@@ -134,7 +147,7 @@ export function fieldHTML(field, value) {
     }
 
     case 'color': {
-      const opts = field.options || [];
+      const opts = resolveOptions(field, cfg);
       const cur = value ?? '';
       body = `<input type="hidden" data-field="${key}" data-kind="text" value="${esc(cur)}">
         <div class="swatch-grid" data-choices="${key}">
@@ -181,8 +194,8 @@ export function fieldHTML(field, value) {
   return `<label class="field"${showIf}><span class="lab">${lab}</span>${body}</label>`;
 }
 
-export function fieldsHTML(type, data = {}) {
-  return (type.fields || []).map((f) => fieldHTML(f, data[f.key])).join('');
+export function fieldsHTML(type, data = {}, cfg = null) {
+  return (type.fields || []).map((f) => fieldHTML(f, data[f.key], cfg)).join('');
 }
 
 /** Read every [data-field] back into a plain object. */

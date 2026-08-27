@@ -11,6 +11,9 @@ import {
   TONES, GENDER_TEMPLATES, BABY_EMOJI, PERSON_EMOJI, TYPE_EMOJI,
   toneStyle, activeTypes, typeOf, fieldsHTML, collectFields, wireFieldControls,
 } from './ui.js';
+import {
+  NUTRIENTS, MILK_KINDS, nutritionOn, milkById, milkSummary,
+} from './nutrition.js';
 
 /* ------------------------------------------------------------ tiny pickers */
 
@@ -83,7 +86,7 @@ function segField(label, name, value, options) {
 export function openBabySheet(babyId = null) {
   const cfg = config();
   const baby = cfg.babies.find((b) => b.id === babyId) || {
-    id: null, name: '', gender: 'surprise', birthDate: '', emoji: '🐣', tone: 'mint',
+    id: null, name: '', gender: 'surprise', birthDate: '', weightKg: '', emoji: '🐣', tone: 'mint',
   };
 
   openSheet(`
@@ -96,6 +99,14 @@ export function openBabySheet(babyId = null) {
     ])}
     <label class="field"><span class="lab">Birthday</span>
       <input type="date" data-meta="birthDate" value="${esc(baby.birthDate || '')}">
+    </label>
+    <label class="field"><span class="lab">Current weight (optional)</span>
+      <div class="row">
+        <input type="number" data-meta="weightKg" inputmode="decimal" min="0" max="40" step="0.05"
+               value="${esc(baby.weightKg ?? '')}" placeholder="e.g. 4.2">
+        <span class="muted small">kg</span>
+      </div>
+      <span class="small muted">Used for the per-kilo intake figures a pediatrician asks about. Update it after each weigh-in.</span>
     </label>
     <label class="field"><span class="lab">Avatar</span>${emojiPicker('emoji', baby.emoji || '🐣', BABY_EMOJI)}</label>
     <label class="field"><span class="lab">Colour</span>${tonePicker(baby.tone || 'mint')}</label>
@@ -126,6 +137,7 @@ export function openBabySheet(babyId = null) {
         name,
         gender: sheet.querySelector('[data-meta="gender"]').value,
         birthDate: sheet.querySelector('[data-meta="birthDate"]').value,
+        weightKg: Number(sheet.querySelector('[data-meta="weightKg"]').value) || null,
         emoji: sheet.querySelector('[data-meta="emoji"]').value || '👶',
         tone: sheet.querySelector('[data-meta="tone"]').value,
       };
@@ -639,7 +651,7 @@ function openPresetSheet(index) {
     </label>
     <label class="field"><span class="lab">Icon</span>${emojiPicker('emoji', preset.emoji || draft.emoji, TYPE_EMOJI)}</label>
     <div class="section-title" style="margin-left:0">One tap records</div>
-    <div data-fields>${fieldsHTML(draft, preset.data || {})}</div>
+    <div data-fields>${fieldsHTML(draft, preset.data || {}, config())}</div>
     <p class="small muted">Leave blank to be asked later. ${draft.mode === 'timer' ? 'Duration is filled in when the timer stops.' : ''}</p>
     <div class="sheet-actions">
       <button class="btn" data-back type="button">Back</button>
@@ -873,19 +885,29 @@ export function renderSetup() {
         </div>`).join('')}
       <button class="btn wide" data-act="add-user">➕ Add person</button>
 
-      <div class="section-title">Buttons</div>
+      <div class="section-title">Tracked metrics</div>
+      <p class="small muted" style="margin:-4px 4px 10px">
+        Tick what you want to keep track of. Unticking hides that card from the
+        Track screen and drops it from the History filters — nothing already
+        logged is deleted, and ticking it again brings everything back.
+      </p>
       ${(cfg.eventTypes || []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999)).map((t) => `
         <div class="list-item" style="${toneStyle(t.tone)};${t.archived ? 'opacity:.55' : ''}">
+          <label class="switch" style="padding:0;min-height:auto" title="${t.archived ? 'Not tracked' : 'Tracked'}">
+            <input type="checkbox" data-act="toggle-type" data-id="${esc(t.id)}" ${t.archived ? '' : 'checked'}
+                   aria-label="Track ${esc(t.label)}">
+            <span class="track"></span>
+          </label>
           <div style="font-size:1.6rem">${esc(t.emoji)}</div>
           <div class="grow">
             <b>${esc(t.label)}</b>
-            <div class="small muted">${t.mode === 'timer' ? '⏱️ timer' : '⚡ one tap'} · ${(t.presets || []).length} button(s)${t.archived ? ' · hidden' : ''}</div>
+            <div class="small muted">${t.mode === 'timer' ? '⏱️ timer' : '⚡ one tap'} · ${(t.presets || []).length} button(s)${t.archived ? ' · not tracked' : ''}</div>
           </div>
-          ${t.archived
-            ? `<button class="btn sm" data-act="unhide-type" data-id="${esc(t.id)}">Show</button>`
-            : `<button class="btn sm" data-act="edit-type" data-id="${esc(t.id)}">Edit</button>`}
+          <button class="btn sm" data-act="edit-type" data-id="${esc(t.id)}">Edit</button>
         </div>`).join('')}
       <button class="btn wide" data-act="add-type">➕ New button</button>
+
+      ${nutritionCard(cfg)}
 
       <div class="section-title">Look &amp; feel</div>
       <div class="card">
@@ -930,6 +952,219 @@ export function renderSetup() {
     </div>`;
 }
 
+/* ------------------------------------------------------------- nutrition */
+
+/**
+ * Setup -> Nutrition. The milk profiles hold label values per 100 mL, so an
+ * entry's recorded cc is all it takes to work out what actually went in.
+ */
+function nutritionCard(cfg) {
+  const n = cfg.nutrition || {};
+  const milks = n.milks || [];
+  const on = nutritionOn(cfg);
+  const shown = new Set(n.show || []);
+  const fallback = milkById(cfg, n.defaultMilkId);
+
+  return `
+    <div class="section-title">Nutrition</div>
+    <div class="card">
+      ${switchRow('Track nutritional intake', 'Work out nutrients from the cc you log', 'nutrition.enabled', n.enabled !== false)}
+      ${on ? `
+        <label class="field"><span class="lab">Assume this when nothing is picked</span>
+          <div class="preset-row" role="group" aria-label="Default milk">
+            ${milks.map((m) => `
+              <button type="button" class="btn sm" data-act="set-default-milk" data-id="${esc(m.id)}"
+                aria-pressed="${m.id === n.defaultMilkId}"
+                style="${m.id === n.defaultMilkId ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${esc(m.emoji || '🍼')} ${esc(m.name)}</button>`).join('')}
+          </div>
+          <span class="small muted">A bottle logged without picking anything counts as
+          ${esc(fallback ? fallback.name : 'the first profile')}. Breastfeeds always count as breast milk.</span>
+        </label>
+
+        <label class="field"><span class="lab">Show these nutrients</span>
+          <div class="nutrient-grid">
+            ${NUTRIENTS.map((x) => `
+              <label class="chk">
+                <input type="checkbox" data-act="toggle-nutrient" data-key="${esc(x.key)}" ${shown.has(x.key) ? 'checked' : ''}>
+                <span>${esc(x.emoji)} ${esc(x.label)} <span class="muted">${esc(x.unit)}</span></span>
+              </label>`).join('')}
+          </div>
+        </label>
+      ` : ''}
+    </div>
+
+    ${on ? `
+      ${milks.map((m) => `
+        <div class="list-item">
+          <div style="font-size:1.6rem">${esc(m.emoji || '🍼')}</div>
+          <div class="grow">
+            <b>${esc(m.name)}</b>${m.id === cfg.nutrition.defaultMilkId ? ' <span class="pill">default</span>' : ''}
+            <div class="small muted">${milkSummary(m)}</div>
+          </div>
+          <button class="btn sm" data-act="edit-milk" data-id="${esc(m.id)}">Edit</button>
+        </div>`).join('')}
+      <button class="btn wide" data-act="add-milk">➕ Add a milk or formula</button>
+      <p class="small muted" style="margin:10px 4px 0">
+        The profiles that ship with the app are label values, rounded, and no
+        substitute for the tin in your kitchen — brands reformulate, and a
+        European stage 1 is not the same as its American cousin. Open any of
+        them and correct the numbers against the panel you actually have.
+      </p>
+    ` : ''}`;
+}
+
+/** Add or edit one milk profile. Every nutrient is per 100 mL of prepared milk. */
+export function openMilkSheet(milkId = null) {
+  const cfg = config();
+  const milk = milkById(cfg, milkId) || {
+    id: null, name: '', emoji: '🍼', kind: 'formula', per100: {},
+  };
+
+  openSheet(`
+    <h3>${milk.id ? 'Edit milk' : 'Add a milk'}</h3>
+    <label class="field"><span class="lab">Name</span>
+      <input type="text" data-meta="name" value="${esc(milk.name)}" placeholder="Bobbie Organic Original">
+    </label>
+    <label class="field"><span class="lab">Icon</span>${emojiPicker('emoji', milk.emoji || '🍼', ['🍼', '🤱', '🌿', '🥛', '🧴', '⭐'])}</label>
+    ${segField('Kind', 'kind', milk.kind || 'formula', MILK_KINDS)}
+
+    <div class="section-title" style="margin-left:0">Nutrition panel</div>
+    ${segField('How your label states them', 'basis', 'ml', [
+      { value: 'ml', label: 'per 100 mL' },
+      { value: 'kcal', label: 'per 100 Cal' },
+    ])}
+    <p class="small muted" style="margin:-6px 0 10px" data-basis-hint>
+      Copy the numbers straight off the panel. Leave anything you do not care
+      about blank.
+    </p>
+
+    <label class="field hidden" data-kcal-row>
+      <span class="lab">Calories per fl oz</span>
+      <div class="row">
+        <input type="number" data-meta="kcalPerOz" inputmode="decimal" min="1" max="60" step="0.5" value="20">
+        <span class="muted small">Cal / fl oz</span>
+      </div>
+      <span class="small muted">Printed near the top of the panel — 20 for most
+      standard-dilution infant formulas. Everything below is scaled by it.</span>
+    </label>
+
+    ${NUTRIENTS.map((x) => `
+      <label class="field" ${x.key === 'kcal' ? 'data-energy-row' : ''}>
+        <span class="lab">${esc(x.emoji)} ${esc(x.label)}</span>
+        <div class="row">
+          <input type="number" data-per100="${esc(x.key)}" inputmode="decimal" min="0" step="0.01"
+                 value="${esc(milk.per100?.[x.key] ?? '')}" placeholder="0">
+          <span class="muted small">${esc(x.unit)}</span>
+        </div>
+      </label>`).join('')}
+    <p class="small muted" data-converted hidden></p>
+
+    <div class="sheet-actions">
+      <button class="btn" data-close type="button">Cancel</button>
+      <button class="btn primary" data-save type="button">Save</button>
+    </div>
+    ${milk.id ? '<button class="btn danger wide" data-delete type="button" style="margin-top:10px">Delete this profile</button>' : ''}
+  `, (sheet) => {
+    wirePickers(sheet);
+
+    const basisInput = sheet.querySelector('[data-meta="basis"]');
+    const kcalRow = sheet.querySelector('[data-kcal-row]');
+    const energyRow = sheet.querySelector('[data-energy-row]');
+    const hint = sheet.querySelector('[data-basis-hint]');
+    const preview = sheet.querySelector('[data-converted]');
+
+    /** Prepared kcal per 100 mL, from the Calories-per-fl-oz on the label. */
+    const kcalPer100ml = () => {
+      const perOz = Number(sheet.querySelector('[data-meta="kcalPerOz"]').value) || 20;
+      return (perOz / 29.5735) * 100;
+    };
+
+    /**
+     * Everything is stored per 100 mL. A US panel states nutrients per 100
+     * Calories, so those get scaled by kcal-per-100-mL / 100 on the way in -
+     * the step that, done by hand and forgotten, overstates a formula's iron
+     * and DHA by about half.
+     */
+    const readPer100 = () => {
+      const perKcal = basisInput.value === 'kcal';
+      const energy = perKcal ? kcalPer100ml() : null;
+      const factor = perKcal ? energy / 100 : 1;
+      const out = {};
+      sheet.querySelectorAll('[data-per100]').forEach((el) => {
+        const key = el.dataset.per100;
+        if (perKcal && key === 'kcal') return;      // 100 per 100 Cal, by definition
+        if (el.value === '') return;
+        out[key] = Math.round(Number(el.value) * factor * 1000) / 1000;
+      });
+      if (perKcal) out.kcal = Math.round(energy * 10) / 10;
+      return out;
+    };
+
+    const paint = () => {
+      const perKcal = basisInput.value === 'kcal';
+      kcalRow.classList.toggle('hidden', !perKcal);
+      energyRow.classList.toggle('hidden', perKcal);
+      hint.textContent = perKcal
+        ? 'US labels state everything per 100 Calories. Type the numbers exactly as printed — this converts them to per 100 mL for you.'
+        : 'Copy the numbers straight off the panel. Leave anything you do not care about blank.';
+      const per100 = readPer100();
+      preview.hidden = !perKcal;
+      if (perKcal) {
+        preview.textContent = `Stored as ${per100.kcal ?? '—'} kcal, ${per100.iron ?? '—'} mg iron, `
+          + `${per100.dha ?? '—'} mg DHA per 100 mL.`;
+      }
+    };
+
+    // Switching basis re-reads numbers that meant something else a moment ago,
+    // so clear them rather than silently rescaling what is already there.
+    sheet.addEventListener('seg-change', (ev) => {
+      if (ev.detail.group !== 'basis') return;
+      sheet.querySelectorAll('[data-per100]').forEach((el) => { el.value = ''; });
+      paint();
+    });
+    sheet.addEventListener('input', paint);
+    paint();
+
+    sheet.querySelector('[data-save]').addEventListener('click', async () => {
+      const name = sheet.querySelector('[data-meta="name"]').value.trim();
+      if (!name) return toast({ icon: '✏️', text: 'Give the milk a name', tone: 'peach' });
+      const per100 = readPer100();
+      const next = {
+        id: milk.id || uid('m'),
+        name,
+        emoji: sheet.querySelector('[data-meta="emoji"]').value || '🍼',
+        kind: sheet.querySelector('[data-meta="kind"]').value,
+        builtin: !!milk.builtin,
+        per100,
+      };
+      closeSheet();
+      await saveConfig((draftCfg) => {
+        const list = draftCfg.nutrition.milks;
+        const i = list.findIndex((m) => m.id === next.id);
+        if (i >= 0) list[i] = next;
+        else list.push(next);
+      });
+      sound.play('success');
+      toast({ icon: next.emoji, text: `<b>${esc(name)}</b> saved`, tone: 'mint' });
+    });
+
+    sheet.querySelector('[data-delete]')?.addEventListener('click', async () => {
+      const cfgNow = config();
+      if ((cfgNow.nutrition.milks || []).length <= 1) {
+        return toast({ icon: '🍼', text: 'Keep at least one milk profile', tone: 'peach' });
+      }
+      if (!confirm(`Remove ${milk.name}? Entries that named it keep the name in the log.`)) return;
+      closeSheet();
+      await saveConfig((draftCfg) => {
+        draftCfg.nutrition.milks = draftCfg.nutrition.milks.filter((m) => m.id !== milk.id);
+        if (draftCfg.nutrition.defaultMilkId === milk.id) {
+          draftCfg.nutrition.defaultMilkId = draftCfg.nutrition.milks[0]?.id || null;
+        }
+      });
+    });
+  });
+}
+
 /** The About card that closes the Setup screen. */
 function aboutCard() {
   const app = state.data?.app || {};
@@ -970,17 +1205,36 @@ function aboutCard() {
     </div>`;
 }
 
+/**
+ * Where a toggle writes. A bare name is a key under `settings` (the common
+ * case); a dotted one is a path from the root of the config, so a switch can
+ * reach somewhere like `nutrition.enabled`.
+ */
+function writeSetting(cfg, name, value) {
+  if (!name.includes('.')) {
+    cfg.settings[name] = value;
+    return;
+  }
+  const parts = name.split('.');
+  let node = cfg;
+  for (const part of parts.slice(0, -1)) {
+    if (!node[part] || typeof node[part] !== 'object') node[part] = {};
+    node = node[part];
+  }
+  node[parts[parts.length - 1]] = value;
+}
+
 /** Settings toggles/sliders are wired once, on the delegated container. */
 export function wireSetup(root) {
   root.querySelectorAll('[data-setting]').forEach((el) => {
     el.addEventListener('change', () => {
-      saveConfig((cfg) => { cfg.settings[el.dataset.setting] = el.checked; });
+      saveConfig((cfg) => writeSetting(cfg, el.dataset.setting, el.checked));
       if (el.dataset.setting === 'sound' && el.checked) sound.play('chime');
     });
   });
   root.querySelectorAll('[data-setting-range]').forEach((el) => {
     el.addEventListener('change', () => {
-      saveConfig((cfg) => { cfg.settings[el.dataset.settingRange] = Number(el.value); });
+      saveConfig((cfg) => writeSetting(cfg, el.dataset.settingRange, Number(el.value)));
       sound.play('ding');
     });
   });
@@ -1032,6 +1286,7 @@ function openRestoreSheet(file, summary) {
     ['People', `${summary.users}${summary.pins ? ` (${summary.pins} with a PIN)` : ''}`],
     ['Buttons', summary.eventTypes],
     ['Alarms', summary.alarms],
+    ...(summary.milks ? [['Milk profiles', summary.milks]] : []),
   ];
 
   const sheet = openSheet(`
