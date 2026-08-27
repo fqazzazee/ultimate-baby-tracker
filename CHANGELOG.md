@@ -3,6 +3,28 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.4.2 — 2026-08-27
+
+### Fixed
+
+- **The Windows installer could not actually be run.** PowerShell's execution
+  policy is `Restricted` for a standard user, so `.\install.ps1` failed with
+  *"running scripts is disabled on this system"* before it did anything — and a
+  `.ps1` that arrived over the internet carries a mark-of-the-web that even
+  `RemoteSigned` rejects. The README's advice was to change the machine's policy
+  first, which is both an extra step and more than the job needs.
+- **New `scripts/install.cmd`**, a two-line launcher that calls the script with
+  `-ExecutionPolicy Bypass`. That applies to the single invocation, changes
+  nothing on the machine, and still needs no administrator rights. It prefers
+  PowerShell 7 and falls back to Windows PowerShell 5.1; the script only uses
+  cmdlets both have.
+- The Windows install instructions now lead with `install.cmd`, and offer a
+  no-clone one-liner that runs the script as a scriptblock — never writing a
+  file, so the policy never applies to it.
+- Added `.gitattributes`, so `.cmd`, `.ps1` and `.vbs` check out with CRLF and
+  `.sh` with LF. A shell script with CRLF endings does not run at all, and a
+  batch file with bare LF endings can confuse `cmd.exe`.
+
 ## 1.4.1 — 2026-08-27
 
 ### Documentation

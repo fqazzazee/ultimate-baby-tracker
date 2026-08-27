@@ -63,24 +63,42 @@ still works and just tells you the command to run it with.
 ### Windows
 
 ```powershell
-.\scripts\install.ps1 install
-.\scripts\install.ps1 update
-.\scripts\install.ps1 status
-.\scripts\install.ps1 service remove
+.\scripts\install.cmd install
+.\scripts\install.cmd update
+.\scripts\install.cmd status
+.\scripts\install.cmd service remove
 ```
+
+**Use `install.cmd`, not `install.ps1` directly.** PowerShell's execution policy
+is `Restricted` for a standard user, so an unsigned `.ps1` will not run at all —
+and one that arrived over the internet carries a mark-of-the-web that even
+`RemoteSigned` rejects. `install.cmd` is a two-line launcher that calls the
+script with `-ExecutionPolicy Bypass`, which applies to that one invocation,
+changes nothing on the machine and needs no administrator rights. It uses
+PowerShell 7 when it is installed and Windows PowerShell 5.1 otherwise; the
+script only uses cmdlets both have.
+
+Three other ways in, if you would rather:
+
+```powershell
+# one invocation, no launcher
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 install
+
+# never writes a script file, so the policy never applies
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/fqazzazee/ultimate-baby-tracker/main/scripts/install.ps1))) install
+
+# permit local scripts once, for your account only
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+The background service itself is unaffected by any of this: the scheduled task
+runs `wscript.exe`, not PowerShell.
 
 A real Windows Service needs administrator rights, so this registers a **per-user
 Scheduled Task** that starts at logon instead, running as you with no console
 window and restarting itself if it falls over. For a machine you log into, that
 is the same thing in practice, and it is the only kind of background job an
 unprivileged account is allowed to create.
-
-If PowerShell refuses to run the file, that is the execution policy rather than
-a permission problem:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
 
 ### What updating does, and does not, touch
 
