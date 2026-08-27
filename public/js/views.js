@@ -1,7 +1,7 @@
 /** The three main screens: Track, History and Alarms. */
 
 import {
-  state, config, currentBaby, runningTimer,
+  state, config, currentBaby, runningTimer, openSheet,
 } from './core.js';
 import {
   esc, fmtTime, fmtDate, fmtAgo, fmtSpan, fmtClock, fmtMinutes, babyAge, dayKey, ringState,
@@ -9,6 +9,10 @@ import {
 import {
   typeOf, userOf, toneStyle, activeTypes, summarize, alertFor,
 } from './ui.js';
+import {
+  nutritionOn, shownNutrients, totalNutrients, fmtNutrient,
+  referenceFor, referenceLine, nutrientMeta, tidy, milkFor, milkTypeIds,
+} from './nutrition.js';
 
 /* --------------------------------------------------------------- utilities */
 
@@ -28,7 +32,8 @@ function lastOfType(typeId) {
 /** Roll up today's numbers for the hero card. */
 function todayStats() {
   const events = todaysEvents();
-  const feedTypes = new Set(['breast', 'bottle']);
+  // Same definition of "a feed" the Statistics screen uses, so the two agree.
+  const feedTypes = milkTypeIds(config());
   let feeds = 0; let volume = 0; let wet = 0; let poop = 0; let sleepMin = 0;
 
   for (const e of events) {
@@ -56,7 +61,8 @@ function heroCard() {
   const baby = currentBaby();
   if (!baby) return '';
   const s = todayStats();
-  const lastFeed = eventsForBaby().find((e) => e.typeId === 'breast' || e.typeId === 'bottle');
+  const feedTypes = milkTypeIds(config());
+  const lastFeed = eventsForBaby().find((e) => feedTypes.has(e.typeId));
   const lastDiaper = lastOfType('diaper');
 
   return `
@@ -80,6 +86,138 @@ function heroCard() {
         <div class="stat"><div class="v">${s.sleepMin ? esc(fmtMinutes(s.sleepMin)) : '—'}</div><div class="k">Sleep</div></div>
       </div>
     </div>`;
+}
+
+/**
+ * What today's cc actually amounted to. Volumes are multiplied by the milk
+ * profile on each feed, so this only ever reflects feeds that recorded an
+ * amount - it says so out loud rather than implying the baby ate less.
+ */
+function nutritionToday() {
+  const cfg = config();
+  if (!nutritionOn(cfg)) return '';
+  const shown = shownNutrients(cfg);
+  if (!shown.length) return '';
+
+  const { totals, ml, counted, unmeasured } = totalNutrients(cfg, todaysEvents());
+  if (!counted) return '';
+  const baby = currentBaby();
+  const weight = Number(baby?.weightKg) || 0;
+  const perKg = weight && totals.kcal ? `${(totals.kcal / weight).toFixed(0)} kcal/kg` : '';
+
+  return `
+    <div class="card" style="${toneStyle('lemon')}">
+      <div class="row">
+        <div style="font-size:1.5rem">🥣</div>
+        <div class="grow" style="flex:1;min-width:0">
+          <div style="font-weight:800">Nutrition today</div>
+          <div class="small muted">${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}${perKg ? ` · ${esc(perKg)}` : ''}</div>
+        </div>
+      </div>
+      <div class="stat-grid kpi">
+        ${shown.map((n) => {
+          const taken = totals[n.key] || 0;
+          return `
+          <button class="stat tappable" data-act="nutrient-info" data-key="${esc(n.key)}"
+            data-tip="${esc(`${n.label}: ${referenceLine(n.key, taken, baby)}`)}"
+            aria-label="${esc(`${n.label}. ${referenceLine(n.key, taken, baby)}. Tap for the reference figure.`)}">
+            <div class="v">${esc(fmtNutrient(n.key, taken).split(' ')[0])}</div>
+            <div class="k">${esc(n.label)} ${esc(n.unit)}</div>
+          </button>`;
+        }).join('')}
+      </div>
+      ${unmeasured ? `<p class="small muted" style="margin:10px 0 0">
+        ${unmeasured} feed${unmeasured === 1 ? '' : 's'} today had no volume recorded, so the real totals are higher.
+      </p>` : ''}
+    </div>`;
+}
+
+/**
+ * What one nutrient tile means, on tap: how much has gone in today, what the
+ * reference figure for a baby this age is, and - the part that matters most -
+ * why that reference is not a target.
+ */
+export function openNutrientSheet(key) {
+  const cfg = config();
+  const baby = currentBaby();
+  const meta = nutrientMeta(key);
+  if (!meta) return;
+
+  const events = todaysEvents();
+  const { totals, ml, counted, unmeasured } = totalNutrients(cfg, events);
+  const taken = totals[key] || 0;
+  const ref = referenceFor(key, baby);
+  const pct = ref?.value ? Math.round((taken / ref.value) * 100) : null;
+
+  // Which milks got the baby here, largest contribution first.
+  const byMilk = new Map();
+  for (const e of events) {
+    const amount = Number(e.data?.amount) || 0;
+    if (!amount || e.typeId === 'pump') continue;
+    const milk = milkFor(cfg, e);
+    if (!milk) continue;
+    const per = Number(milk.per100?.[key]);
+    if (!Number.isFinite(per)) continue;
+    const cur = byMilk.get(milk.name) || { ml: 0, value: 0, emoji: milk.emoji };
+    cur.ml += amount;
+    cur.value += (per * amount) / 100;
+    byMilk.set(milk.name, cur);
+  }
+  const sources = [...byMilk.entries()].sort((a, b) => b[1].value - a[1].value);
+
+  openSheet(`
+    <h3>${esc(meta.emoji)} ${esc(meta.label)} today</h3>
+
+    <div class="card" style="margin:0 0 12px;text-align:center">
+      <div style="font-size:2.1rem;font-weight:900;line-height:1.1">${esc(fmtNutrient(key, taken))}</div>
+      <div class="small muted">from ${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}</div>
+      ${ref?.value !== null && ref?.value !== undefined ? `
+        <div class="meter" role="img"
+          aria-label="${esc(`${pct}% of the ${ref.kind || 'reference'} figure of ${tidy(ref.value)} ${meta.unit}`)}">
+          <span style="width:${Math.min(100, pct)}%"></span>
+        </div>
+        <div class="small muted" style="margin-top:6px">
+          about <b>${pct}%</b> of ${esc(tidy(ref.value))} ${esc(meta.unit)}
+        </div>` : ''}
+    </div>
+
+    <label class="field"><span class="lab">The reference figure</span>
+      ${ref?.value !== null && ref?.value !== undefined ? `
+        <div class="row" style="justify-content:space-between">
+          <span>${esc(ref.kind || 'Reference')}</span>
+          <b>${esc(tidy(ref.value))} ${esc(meta.unit)} / day</b>
+        </div>
+        <span class="small muted">${esc(ref.basis)}${ref.assumedAge ? ' — no birthday set, so this assumes under six months' : ''}</span>`
+      : `<span class="small muted">${esc(ref?.perKgOnly
+          ? 'Energy needs scale with body mass, so this one needs a weight on the baby\'s profile before it can be turned into a daily figure.'
+          : 'There is no reference intake for this one in infancy.')}</span>`}
+    </label>
+
+    ${ref?.note ? `<p class="small muted">${esc(ref.note)}</p>` : ''}
+
+    ${sources.length ? `
+      <label class="field"><span class="lab">Where it came from</span>
+        ${sources.map(([name, v]) => `
+          <div class="row" style="justify-content:space-between">
+            <span>${esc(v.emoji || '🍼')} ${esc(name)} <span class="muted small">${v.ml} cc</span></span>
+            <b>${esc(fmtNutrient(key, v.value))}</b>
+          </div>`).join('')}
+      </label>` : ''}
+
+    <div class="notice" style="border-color:color-mix(in srgb,var(--muted) 40%,transparent);background:var(--surface-2);color:var(--text)">
+      <b>A reference, not a target</b>
+      For the first six months these figures are an <i>Adequate Intake</i> — the
+      observed average of healthy, exclusively breastfed babies. They describe
+      well-fed infants rather than setting a bar to clear, so being under one is
+      not a deficiency and there is no prize for being over it.
+      ${unmeasured ? `And this only counts feeds with a volume written down: ${unmeasured}
+        today had none, so the real total is higher than the number above.` : ''}
+      Anything that worries you belongs with your pediatrician, not a phone screen.
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn wide" data-close type="button">Close</button>
+    </div>`);
 }
 
 function timerCards() {
@@ -170,18 +308,31 @@ function recentStrip() {
     <button class="btn wide" data-act="tab" data-tab="history" style="margin-top:4px">See full history</button>`;
 }
 
+/**
+ * Three bands of the Track screen, kept as separate sections so a wide screen
+ * can set them side by side: the buttons on the left, how the day is going in
+ * the middle, what just happened on the right.
+ *
+ * Source order is middle, left, right - which is the order a phone wants, since
+ * it stacks them straight down. The columns are re-ordered in CSS, not here, so
+ * the narrow layout stays exactly as it was.
+ */
 export function renderTrack() {
   const cfg = config();
   if (!cfg.babies.length) return onboarding();
+
+  const status = `${heroCard()}${nutritionToday()}${timerCards()}${alarmStrip()}`;
+  const recent = recentStrip();
+
   return `
     ${offlineBar()}
-    <div class="wrap">
-      ${heroCard()}
-      ${timerCards()}
-      ${alarmStrip()}
-      <div class="section-title">Tap to log</div>
-      ${activeTypes(cfg).map(typeCard).join('')}
-      ${recentStrip()}
+    <div class="wrap track-cols">
+      ${status ? `<section class="col-status">${status}</section>` : ''}
+      <section class="col-log">
+        <div class="section-title">Tap to log</div>
+        ${activeTypes(cfg).map(typeCard).join('')}
+      </section>
+      ${recent ? `<section class="col-recent">${recent}</section>` : ''}
     </div>`;
 }
 

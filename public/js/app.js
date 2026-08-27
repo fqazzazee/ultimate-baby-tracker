@@ -4,21 +4,26 @@ import {
   state, config, currentBaby, currentUser, settings,
   refresh, render, setRenderer, saveConfig, toast, closeSheet, sheetOpen,
   quickLog, openLogSheet, stopRunningTimer, cancelRunningTimer, applyTheme,
-  isUnlocked, lockProfile,
+  isUnlocked, lockProfile, onRefresh,
 } from './core.js';
 import { api, subscribe } from './api.js';
 import * as sound from './sound.js';
 import { $, esc, store, fmtClock, fmtSpan, babyAge, ringState } from './util.js';
 import { toneStyle, typeOf } from './ui.js';
-import { renderTrack, renderHistory, renderAlarms } from './views.js';
+import { renderTrack, renderHistory, renderAlarms, openNutrientSheet } from './views.js';
+import { renderStats, loadStats, statsKey } from './stats.js';
+import { toggleTable, downloadChart } from './charts.js';
+import { wireTips } from './tips.js';
 import {
   renderSetup, wireSetup, exportCSV, downloadBackup, restoreBackup,
-  openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet, unlockProfile,
+  openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet, openMilkSheet,
+  unlockProfile,
 } from './settings.js';
 
 const TABS = [
   { id: 'track', label: 'Track', icon: '🍼' },
   { id: 'history', label: 'History', icon: '📖' },
+  { id: 'stats', label: 'Stats', icon: '📊' },
   { id: 'alarms', label: 'Alarms', icon: '⏰' },
   { id: 'setup', label: 'Setup', icon: '⚙️' },
 ];
@@ -75,6 +80,7 @@ function tabbar() {
 function viewHTML() {
   switch (state.tab) {
     case 'history': return renderHistory();
+    case 'stats': return renderStats();
     case 'alarms': return renderAlarms();
     case 'setup': return renderSetup();
     default: return renderTrack();
@@ -109,10 +115,39 @@ function renderAll() {
     </div>`;
   $('#view').innerHTML = viewHTML();
   if (state.tab === 'setup') wireSetup($('#view'));
-  // Sticky day headings need to know how tall the pinned header actually is.
-  document.documentElement.style.setProperty('--header-h', `${$('#chrome').offsetHeight}px`);
+  measureHeader();
   window.scrollTo(0, scrollY);
   tick();
+}
+
+/* ------------------------------------------------------------------ header */
+
+/** Sticky day headings need to know how tall the pinned header actually is. */
+function measureHeader() {
+  document.documentElement.style.setProperty('--header-h', `${$('#chrome').offsetHeight}px`);
+}
+
+/**
+ * Shrink the header once reading has started, and restore it at the top.
+ *
+ * The two thresholds are deliberately different: compacting the header removes
+ * a row of its own height, and a single boundary would sit right where that
+ * removal puts you, flipping the class on every frame.
+ */
+function watchHeaderScroll() {
+  const chrome = $('#chrome');
+  let compact = false;
+  const onScroll = () => {
+    const next = window.scrollY > (compact ? 24 : 72);
+    if (next === compact) return;
+    compact = next;
+    chrome.classList.toggle('compact', compact);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  // The header changes height while the transition runs, so measure it as it
+  // moves rather than once at either end.
+  new ResizeObserver(measureHeader).observe(chrome);
+  onScroll();
 }
 
 /* ----------------------------------------------------- one-second heartbeat */
@@ -218,18 +253,42 @@ function showRingOverlay(inst) {
 
 /* -------------------------------------------------------------- delegation */
 
+/** The line printed under an exported chart, so the file explains itself. */
+function chartFooter() {
+  const baby = currentBaby();
+  const days = state.statsDays;
+  return `${baby ? `${baby.name} · ` : ''}last ${days} day${days === 1 ? '' : 's'}`
+    + ` · exported ${new Date().toLocaleDateString()} · ${state.data?.app?.name || 'Ultimate Baby Tracker'}`;
+}
+
+/** Fetch the Statistics slice if what we hold is for another baby or range. */
+async function ensureStats() {
+  if (state.tab !== 'stats' || state.stats.key === statsKey()) return;
+  state.stats = { ...state.stats, loading: true, error: null };
+  render();
+  await loadStats();
+  render();
+}
+
 const ACTIONS = {
   tab: (el) => {
     state.tab = el.dataset.tab;
     store.set('tab', state.tab);
     render();
     window.scrollTo(0, 0);
+    return ensureStats();
+  },
+  'stats-range': (el) => {
+    state.statsDays = Number(el.dataset.days);
+    store.set('statsDays', state.statsDays);
+    return ensureStats();
   },
   'pick-baby': async (el) => {
     state.babyId = el.dataset.id;
     store.set('babyId', state.babyId);
     sound.play('pop');
     await refresh();
+    await ensureStats();
   },
   'pick-user': (el) => {
     const id = el.dataset.id;
@@ -272,6 +331,13 @@ const ACTIONS = {
 
   'filter-type': (el) => { state.historyType = el.dataset.type; render(); },
   range: async (el) => { state.historyDays = Number(el.dataset.days); await refresh(); },
+  'viz-table': (el) => toggleTable($('#view'), el.dataset.vizTable),
+  'viz-download': async (el) => {
+    await downloadChart($('#view'), el.dataset.vizDownload, { footer: chartFooter() });
+    toast({ icon: '⬇️', text: 'Chart saved as a PNG', tone: 'sky', ms: 2500 });
+  },
+  'nutrient-info': (el) => openNutrientSheet(el.dataset.key),
+
   export: () => exportCSV(),
   backup: () => downloadBackup(),
   restore: () => restoreBackup(),
@@ -286,10 +352,27 @@ const ACTIONS = {
   },
   'add-type': () => openTypeSheet(),
   'edit-type': (el) => openTypeSheet(el.dataset.id),
-  'unhide-type': (el) => saveConfig((cfg) => {
-    const t = cfg.eventTypes.find((x) => x.id === el.dataset.id);
-    if (t) t.archived = false;
-  }),
+  /** The tracked-metric tick: `archived` is what hides a card everywhere else. */
+  'toggle-type': (el) => {
+    const tracked = el.checked;
+    sound.play(tracked ? 'pop' : 'undo');
+    return saveConfig((cfg) => {
+      const t = cfg.eventTypes.find((x) => x.id === el.dataset.id);
+      if (t) t.archived = !tracked;
+    });
+  },
+  'add-milk': () => openMilkSheet(),
+  'edit-milk': (el) => openMilkSheet(el.dataset.id),
+  'set-default-milk': (el) => saveConfig((cfg) => { cfg.nutrition.defaultMilkId = el.dataset.id; }),
+  'toggle-nutrient': (el) => {
+    const key = el.dataset.key;
+    const on = el.checked;
+    return saveConfig((cfg) => {
+      const shown = new Set(cfg.nutrition.show || []);
+      if (on) shown.add(key); else shown.delete(key);
+      cfg.nutrition.show = [...shown];
+    });
+  },
 
   'add-alarm': () => openAlarmSheet(),
   'edit-alarm': (el) => openAlarmSheet(el.dataset.id),
@@ -365,6 +448,7 @@ function ensureProfileUnlocked() {
 async function boot() {
   setRenderer(renderAll);
   applyTheme('auto');
+  onRefresh(() => (state.tab === 'stats' ? loadStats() : null));
 
   document.addEventListener('click', (ev) => {
     const input = ev.target.closest('input[data-act]');
@@ -377,12 +461,21 @@ async function boot() {
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && sheetOpen()) closeSheet();
   });
+  // Charts are laid out in CSS pixels, so a width change needs a redraw.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (state.tab !== 'stats') return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(render, 150);
+  });
   // Browsers need a gesture before they will let us make a sound.
   document.addEventListener('pointerdown', () => sound.unlock(), { once: true });
+  wireTips();
 
   await refresh();
   if (!config().babies.length) state.tab = 'track';
   render();
+  watchHeaderScroll();
   ensureProfileUnlocked();
 
   setInterval(tick, 1000);
