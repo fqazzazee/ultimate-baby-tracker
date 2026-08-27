@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ultimate Baby Tracker</title>
+<meta name="description" content="One slide: what Ultimate Baby Tracker does, and what it costs.">
+
+<!--
+  The product slide, as one editable page.
+
+  It is a fixed 1600x900 stage that scales to whatever it is opened in, so
+  everything is sized in `var(--u)` - one unit is one pixel on that stage.
+  Edit the copy in the markup, the colours in the `:root` block at the top of
+  the stylesheet, and the screenshots in `assets/`.
+
+  README.md shows `slide.png`, a render of this file. After changing anything
+  here, regenerate it:
+
+      node scripts/render-slide.mjs
+
+  The screenshots came from the app itself, filled with generated demo data -
+  no real baby's entries are in this repository.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Karla:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* One slide, one visual world: the app's own 3am palette - ink-plum ground,
+     nursery pastels for identity. Deliberately single-theme, so every colour
+     is painted explicitly and the page holds on either host background. */
+  :root {
+    --ground: #15101f;
+    --ground-2: #1c1530;
+    --panel: #221a38;
+    --hairline: #322747;
+    --ink: #f8f3fb;
+    --ink-2: #cfc4e0;
+    --muted: #9d90b4;
+    --pink: #f4a7c0;
+    --mint: #7fd6bc;
+    --sky: #8cbbf2;
+    --lav: #bfaaf0;
+
+    /* 1 unit = 1px on a 1600x900 slide, scaled to whatever the viewer has. */
+    --u: calc(min(100vw, 177.7778vh) / 1600);
+    --sans: 'Karla', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --display: 'Fraunces', ui-serif, Georgia, 'Times New Roman', serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Mono', monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  .stage {
+    width: calc(1600 * var(--u));
+    height: calc(900 * var(--u));
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 90% at 88% 8%, #241a3d 0%, rgba(36, 26, 61, 0) 55%),
+      radial-gradient(90% 70% at 4% 96%, #2a1a2c 0%, rgba(42, 26, 44, 0) 60%),
+      var(--ground);
+    display: grid;
+    grid-template-columns: calc(470 * var(--u)) 1fr;
+    gap: calc(48 * var(--u));
+    padding: calc(52 * var(--u)) calc(56 * var(--u));
+    font-size: calc(16 * var(--u));
+  }
+
+  .stage > *, .shots > *, .row > * { min-height: 0; min-width: 0; }
+
+  /* ---------- left rail: the pitch ---------- */
+
+  .pitch { display: flex; flex-direction: column; height: 100%; }
+
+  .wordmark { display: flex; align-items: center; gap: calc(11 * var(--u)); }
+  .wordmark svg { width: calc(34 * var(--u)); height: calc(34 * var(--u)); border-radius: calc(9 * var(--u)); display: block; }
+  .wordmark b {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: calc(17 * var(--u));
+    letter-spacing: calc(-0.15 * var(--u));
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: calc(11.5 * var(--u));
+    letter-spacing: calc(1.9 * var(--u));
+    text-transform: uppercase;
+    color: var(--mint);
+    margin-top: calc(32 * var(--u));
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-optical-sizing: auto;
+    font-weight: 700;
+    font-size: calc(53 * var(--u));
+    line-height: 0.95;
+    letter-spacing: calc(-1.1 * var(--u));
+    text-wrap: balance;
+    margin: calc(15 * var(--u)) 0 0;
+  }
+  h1 em { font-style: normal; color: var(--pink); }
+
+  .sub {
+    margin: calc(16 * var(--u)) 0 0;
+    font-size: calc(15.5 * var(--u));
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: calc(430 * var(--u));
+  }
+
+  /* Each row is one screen of the app, in tab order - the structure is the
+     product's own, not decoration. */
+  .screens {
+    list-style: none;
+    margin: calc(26 * var(--u)) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: calc(11 * var(--u));
+  }
+  .screens li {
+    display: grid;
+    grid-template-columns: calc(74 * var(--u)) 1fr;
+    align-items: baseline;
+    gap: calc(13 * var(--u));
+    font-size: calc(14 * var(--u));
+    line-height: 1.4;
+    color: var(--ink-2);
+  }
+  .screens dfn {
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: calc(11 * var(--u));
+    letter-spacing: calc(1.3 * var(--u));
+    text-transform: uppercase;
+    color: var(--tone);
+    border-left: calc(2 * var(--u)) solid var(--tone);
+    padding-left: calc(9 * var(--u));
+  }
+  .screens b { color: var(--ink); font-weight: 700; }
+
+  .close { margin-top: auto; }
+
+  .price {
+    display: flex;
+    align-items: baseline;
+    gap: calc(14 * var(--u));
+    border-top: calc(1 * var(--u)) solid var(--hairline);
+    padding-top: calc(20 * var(--u));
+  }
+  .price .free {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: calc(36 * var(--u));
+    line-height: 1;
+    color: var(--mint);
+  }
+  .price p {
+    margin: 0;
+    font-size: calc(13.5 * var(--u));
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .price p b { color: var(--ink-2); font-weight: 500; }
+
+  .install {
+    margin-top: calc(16 * var(--u));
+    display: flex;
+    align-items: center;
+    gap: calc(10 * var(--u));
+    font-family: var(--mono);
+    font-size: calc(12.5 * var(--u));
+    color: var(--ink-2);
+    background: #0f0b18;
+    border: calc(1 * var(--u)) solid var(--hairline);
+    border-radius: calc(9 * var(--u));
+    padding: calc(10 * var(--u)) calc(13 * var(--u));
+  }
+  .install span { color: var(--pink); }
+
+  .fine {
+    margin: calc(12 * var(--u)) 0 0;
+    font-family: var(--mono);
+    font-size: calc(10.5 * var(--u));
+    line-height: 1.7;
+    letter-spacing: calc(0.6 * var(--u));
+    color: #7a6d90;
+  }
+  .fine b { color: var(--ink-2); font-weight: 500; letter-spacing: calc(0.3 * var(--u)); }
+
+  /* ---------- right: the product itself ---------- */
+
+  .shots {
+    position: relative;
+    display: grid;
+    grid-template-rows: calc(458 * var(--u)) calc(318 * var(--u));
+    gap: calc(20 * var(--u));
+  }
+
+  figure { margin: 0; }
+
+  .frame {
+    border-radius: calc(14 * var(--u));
+    border: calc(1 * var(--u)) solid var(--hairline);
+    overflow: hidden;
+    background: var(--panel);
+    box-shadow: 0 calc(24 * var(--u)) calc(52 * var(--u)) rgba(6, 3, 14, 0.55);
+  }
+  .frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+
+  .hero { height: 100%; }
+
+  .row {
+    display: grid;
+    grid-template-columns: calc(200 * var(--u)) 1fr 1fr;
+    gap: calc(21 * var(--u));
+    align-items: end;
+  }
+
+  .t-stats { grid-column: 2; }
+  .t-nutrition { grid-column: 3; }
+  .tile { display: flex; flex-direction: column; gap: calc(9 * var(--u)); height: 100%; }
+  .tile .frame { flex: 1; min-height: 0; }
+  figcaption {
+    font-family: var(--mono);
+    font-size: calc(10.5 * var(--u));
+    letter-spacing: calc(1.4 * var(--u));
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  figcaption span { color: var(--tone); }
+
+  /* The phone rises out of the row and over the hero: same app, smaller thumb. */
+  .phone {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: calc(200 * var(--u));
+    height: calc(418 * var(--u));
+    z-index: 2;
+    border-radius: calc(22 * var(--u));
+    border: calc(5 * var(--u)) solid #2b2140;
+    box-shadow: 0 calc(26 * var(--u)) calc(46 * var(--u)) rgba(6, 3, 14, 0.62);
+  }
+  .phone img { object-position: top center; }
+
+  /* The one loud thing on the slide: a price sticker, because the price is
+     the pitch. */
+  .sticker {
+    position: absolute;
+    top: calc(-16 * var(--u));
+    right: calc(-14 * var(--u));
+    z-index: 3;
+    transform: rotate(-7deg);
+    background: var(--mint);
+    color: #10261f;
+    border-radius: 50%;
+    width: calc(112 * var(--u));
+    height: calc(112 * var(--u));
+    display: grid;
+    place-content: center;
+    text-align: center;
+    box-shadow: 0 calc(10 * var(--u)) calc(24 * var(--u)) rgba(6, 3, 14, 0.5);
+  }
+  .sticker b {
+    display: block;
+    font-family: var(--display);
+    font-size: calc(31 * var(--u));
+    line-height: 1;
+    letter-spacing: calc(-0.6 * var(--u));
+  }
+  .sticker i {
+    display: block;
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: calc(9 * var(--u));
+    letter-spacing: calc(1.2 * var(--u));
+    margin-top: calc(4 * var(--u));
+  }
+
+  /* ---------- entrance ---------- */
+
+  @media (prefers-reduced-motion: no-preference) {
+    .anim { animation: rise 620ms cubic-bezier(0.22, 0.68, 0.3, 1) backwards; }
+    .d1 { animation-delay: 60ms; }
+    .d2 { animation-delay: 150ms; }
+    .d3 { animation-delay: 240ms; }
+    .d4 { animation-delay: 330ms; }
+    .sticker { animation: stamp 520ms cubic-bezier(0.2, 1.3, 0.4, 1) 620ms backwards; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(calc(14 * var(--u))); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes stamp {
+    from { opacity: 0; transform: rotate(-7deg) scale(1.35); }
+    to { opacity: 1; transform: rotate(-7deg) scale(1); }
+  }
+
+  @media print {
+    @page { size: landscape; margin: 0; }
+    :root { --u: calc(100vw / 1600); }
+    body { min-height: auto; }
+    .anim, .sticker { animation: none; }
+  }
+</style>
+
+</head>
+
+<body>
+<div class="stage">
+  <div class="pitch">
+    <div class="wordmark anim d1">
+      <svg viewBox="0 0 128 128" aria-hidden="true">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd9e6"/><stop offset="1" stop-color="#f2a0bd"/></linearGradient></defs>
+        <rect width="128" height="128" rx="30" fill="url(#g)"/>
+        <path d="M52 20h24a6 6 0 0 1 0 12H52a6 6 0 0 1 0-12z" fill="#fff"/>
+        <path d="M50 34h28l4 10H46z" fill="#fff" opacity=".85"/>
+        <rect x="42" y="46" width="44" height="62" rx="16" fill="#fff"/>
+        <rect x="50" y="70" width="28" height="30" rx="10" fill="#8fc4f0" opacity=".55"/>
+        <circle cx="58" cy="60" r="3.5" fill="#f2a0bd"/>
+        <circle cx="70" cy="60" r="3.5" fill="#f2a0bd"/>
+      </svg>
+      <b>Ultimate Baby Tracker</b>
+    </div>
+
+    <p class="eyebrow anim d1">Runs on your own machine</p>
+    <h1 class="anim d2">One tap at 3am.<br><em>Answers at the check-up.</em></h1>
+    <p class="sub anim d2">
+      Feeds, nappies, sleep, medicine and anything else you invent — logged with one
+      thumb by whoever is holding the baby, and added up into the numbers a
+      pediatrician actually asks for.
+    </p>
+
+    <ul class="screens anim d3">
+      <li style="--tone: var(--pink)"><dfn>Track</dfn><span><b>One tap per event.</b> Feeds and sleep run as timers. Undo for a few seconds after every tap.</span></li>
+      <li style="--tone: var(--sky)"><dfn>History</dfn><span><b>Every entry, and who logged it.</b> Grouped by day, filterable, editable, exports to CSV.</span></li>
+      <li style="--tone: var(--lav)"><dfn>Stats</dfn><span><b>1 to 90 days.</b> Intake per kilo, sleep, nappies and nutrients. Each chart saves as an image.</span></li>
+      <li style="--tone: var(--mint)"><dfn>Alarms</dfn><span><b>“Tell me if she hasn’t fed in three hours.”</b> Rings on time, even in a background tab.</span></li>
+    </ul>
+
+    <div class="close">
+      <div class="price anim d4">
+        <span class="free">Free</span>
+        <p><b>No accounts. No cloud. No subscription.</b><br>MIT-licensed and open source — your entries stay on your machine as plain text you can read.</p>
+      </div>
+      <div class="install anim d4"><span>$</span> ./scripts/install.sh install</div>
+      <p class="fine anim d4"><b>github.com/fqazzazee/ultimate-baby-tracker</b><br>LINUX · MACOS · WINDOWS — SERVICE INSTALL, NO ADMIN RIGHTS</p>
+    </div>
+  </div>
+
+  <div class="shots">
+    <div class="sticker"><b>$0</b><i>FOREVER</i></div>
+
+    <figure class="frame hero anim d2">
+      <img src="assets/track.webp" alt="The Track screen: tap-to-log buttons for breastfeed, bottle, diaper and sleep on the left, the baby's day and nutrition totals in the middle, and the most recent entries on the right.">
+    </figure>
+
+    <div class="row">
+      <figure class="frame phone anim d3">
+        <img src="assets/phone.webp" alt="The same tracker on a phone, showing Amara's totals for the day and the nutrition card.">
+      </figure>
+
+      <figure class="tile t-stats anim d3">
+        <figcaption><span style="--tone: var(--lav)">Stats</span> · last 30 days</figcaption>
+        <div class="frame"><img src="assets/stats.webp" alt="Daily averages and a column chart of millilitres of milk per day across a month."></div>
+      </figure>
+
+      <figure class="tile t-nutrition anim d4">
+        <figcaption><span style="--tone: var(--pink)">Setup</span> · nutrition</figcaption>
+        <div class="frame"><img src="assets/nutrition.webp" alt="Nutrition settings with editable formula profiles and tick boxes for which nutrients to show."></div>
+      </figure>
+    </div>
+  </div>
+</div>
+</body>
+</html>
