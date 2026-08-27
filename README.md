@@ -174,8 +174,7 @@ tombstones pile up. Copying the folder is still the simplest backup there is.
 Two things worth knowing. The bundle contains the salted PIN hashes, so keep
 the file as private as the data folder itself. And before a restore overwrites
 anything, the current state is written to `data/pre-restore-<timestamp>.json`
-in the same format — restoring the wrong file costs you a minute, not your
-history.
+in the same format.
 
 Either half works from the command line as well:
 
