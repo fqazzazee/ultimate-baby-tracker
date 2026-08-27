@@ -3,6 +3,41 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.4.3 — 2026-08-27
+
+### Fixed
+
+- **The Windows installer aborted on a clone that had actually worked.** `git`
+  writes ordinary progress to stderr — "Cloning into …" is not an error — and
+  with `$ErrorActionPreference = 'Stop'` in force, `2>&1` turned that into a
+  terminating `NativeCommandError`. Reported as
+  `install.ps1:128 … NotSpecified: (Cloning into 'C...Tracker\app'…) NativeCommandError`.
+  Every external command now runs through one helper that captures stderr as
+  plain text and judges success by the **exit code**, keeping the captured text
+  for the message when something really did fail. A bad `--branch` now says
+  *"Remote branch not found in upstream origin"* instead of nothing useful.
+- The bug was specific to **Windows PowerShell 5.1**; PowerShell 7 does not
+  raise it, which is why `install.cmd` preferring `pwsh` masked it. The fix
+  works on both.
+- Native arguments are passed as explicit arrays. Loose tokens like `-C` and
+  `--depth` are candidates for PowerShell's own parameter binder before they
+  ever reach `git`.
+- A missing `LOCALAPPDATA` now says so, rather than failing inside `Join-Path`
+  with *"Cannot bind argument to parameter 'Path' because it is null"*.
+- `Get-ScheduledTask`, `Get-CimInstance` and `Get-NetIPAddress` are guarded.
+  A cmdlet that does not exist raises a command-not-found error, which
+  `-ErrorAction SilentlyContinue` cannot suppress, so their absence took the
+  whole script down instead of degrading to "no service registered".
+- The hints printed on screen name `install.cmd`, which is what the docs tell
+  people to run.
+
+### Testing
+
+`install.ps1` is no longer unverified. It now runs start to finish under a real
+PowerShell — parse check, `install`, `status`, the installed app answering on
+its port, `update`, and a deliberately broken `--branch` to confirm failures are
+still caught and explained.
+
 ## 1.4.2 — 2026-08-27
 
 ### Fixed
