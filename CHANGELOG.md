@@ -24,6 +24,9 @@ and the version in `package.json` is what the header and the About card display.
   GitHub strips `<style>`, `<script>` and iframes from Markdown, so a README
   cannot render live HTML; the rendered PNG is what it shows, and the page is
   what you edit.
+- **GitHub Pages is on**, serving this repository from `main`, so the slide has
+  a live address: **<https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/>**. The README image links to it.
+  The site root renders the README itself.
 
 ## 1.4.3 — 2026-08-27
 
