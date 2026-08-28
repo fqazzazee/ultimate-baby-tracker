@@ -3,6 +3,49 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.6.0 — 2026-08-28
+
+### Nutrition
+
+- **The Nutrition card now covers a rolling 24 hours**, not the calendar day.
+  At 2 a.m. "today" is four feeds old and answers nothing. Mini buttons on the
+  card switch it to **3 days, 7 days or 30 days**, which report a *daily
+  average* rather than a total — the only form that can be held against a
+  reference intake, which is a per-day figure. The card fetches its own slice of
+  the log, the way the Statistics screen does, since `/api/state` only carries a
+  week.
+- **A window the log cannot fill says "not enough data"** rather than dividing
+  four days of entries by thirty and calling the answer a monthly average. The
+  24-hour view is exempt: a log that started this morning is not a problem, it
+  is a new baby. `/api/state` gained `firstEventAt` so the card knows where the
+  log begins.
+- The nutrient sheet behind each tile follows whichever window the card is set
+  to — the headline figure, the milks that contributed it, and the wording.
+
+- **Both Bobbie profiles now come straight off Bobbie's own panels** for the
+  14.1 oz cans: protein 2.05 g, fat 5.5 g, carbohydrate 10.4 g, calcium 78 mg,
+  iron 1.2 mg, vitamin D 75 IU and sodium 25 mg per 100 Calories, over a label
+  that reads *"diluted: each 5 fl oz (150 mL) contains 100 calories"*. Dividing
+  that column by the label's own 1.5 rather than by an assumed 20 Cal/fl oz
+  moves carbohydrate from 7.3 to 6.93 g and sodium from 18 to 16.7 mg per
+  100 mL. DHA stays 20 mg/100 kcal, which is Bobbie's spec sheet rather than the
+  panel. Bobbie's 24 oz and 12.7 oz Original cans are a different recipe.
+- **New profile: Bobbie Organic Whole Milk.** An existing config picks it up
+  next to the Original, and a config whose Bobbie numbers are still the shipped
+  ones is corrected; anyone who typed in the tin from their own kitchen keeps
+  what they typed. Config version 4.
+
+### Setup
+
+- **A third way to type a nutrition panel in: "per 5 fl oz".** For the label
+  sentence *"diluted: each 5 fl oz (150 mL) contains 100 calories"* — one bottle
+  is one 100-Calorie column, so the editor divides by 1.5 and no
+  Calories-per-fl-oz guess is needed. Type the numbers exactly as printed.
+- **Vitamin D is converted from IU** on either label basis, which is how a
+  per-100-Calorie panel prints it. The field's unit now says `IU` while one of
+  those is selected, and the preview line under the panel reports what was
+  stored.
+
 ## 1.5.0 — 2026-08-28
 
 ### Tracked metrics

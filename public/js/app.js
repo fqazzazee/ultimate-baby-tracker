@@ -10,7 +10,10 @@ import { api, subscribe } from './api.js';
 import * as sound from './sound.js';
 import { $, esc, store, fmtClock, fmtSpan, babyAge, ringState } from './util.js';
 import { toneStyle, typeOf } from './ui.js';
-import { renderTrack, renderHistory, renderAlarms, openNutrientSheet } from './views.js';
+import {
+  renderTrack, renderHistory, renderAlarms, openNutrientSheet,
+  loadNutrition, nutritionKey,
+} from './views.js';
 import { renderStats, loadStats, statsKey } from './stats.js';
 import { toggleTable, downloadChart } from './charts.js';
 import { wireTips } from './tips.js';
@@ -270,25 +273,41 @@ async function ensureStats() {
   render();
 }
 
+/** The same, for the window the Nutrition card on Track is showing. */
+async function ensureNutrition() {
+  if (state.tab !== 'track' || state.nutrition.key === nutritionKey()) return;
+  state.nutrition = { ...state.nutrition, loading: true, error: null };
+  render();
+  await loadNutrition();
+  render();
+}
+
 const ACTIONS = {
   tab: (el) => {
     state.tab = el.dataset.tab;
     store.set('tab', state.tab);
     render();
     window.scrollTo(0, 0);
-    return ensureStats();
+    return Promise.all([ensureStats(), ensureNutrition()]);
   },
   'stats-range': (el) => {
     state.statsDays = Number(el.dataset.days);
     store.set('statsDays', state.statsDays);
     return ensureStats();
   },
+  /** How far back the Nutrition card on Track looks: 24h, 3d, 7d or 30d. */
+  'nutrition-range': (el) => {
+    state.nutritionHours = Number(el.dataset.hours);
+    store.set('nutritionHours', state.nutritionHours);
+    sound.play('pop');
+    return ensureNutrition();
+  },
   'pick-baby': async (el) => {
     state.babyId = el.dataset.id;
     store.set('babyId', state.babyId);
     sound.play('pop');
     await refresh();
-    await ensureStats();
+    await Promise.all([ensureStats(), ensureNutrition()]);
   },
   'pick-user': (el) => {
     const id = el.dataset.id;
@@ -471,6 +490,7 @@ async function boot() {
   setRenderer(renderAll);
   applyTheme('auto');
   onRefresh(() => (state.tab === 'stats' ? loadStats() : null));
+  onRefresh(() => (state.tab === 'track' ? loadNutrition() : null));
 
   document.addEventListener('click', (ev) => {
     const input = ev.target.closest('input[data-act]');

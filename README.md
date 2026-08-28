@@ -90,7 +90,8 @@ every update, so updating cannot touch them.
 | **Setup** | Babies, people, which metrics to track and in what order, which milks to offer, which charts to draw, custom buttons, backup and restore. |
 
 Also: multiple babies and multiple carers (every entry records who did it),
-optional 4-digit profile PINs, nutrition worked out from the cc you already log,
+optional 4-digit profile PINs, nutrition worked out from the cc you already log
+over a rolling 24 hours to a month,
 light and dark themes, and spacing that grows with your system text size.
 
 ## Where your data goes

@@ -3,6 +3,7 @@
 import {
   state, config, currentBaby, runningTimer, openSheet,
 } from './core.js';
+import { api } from './api.js';
 import {
   esc, fmtTime, fmtDate, fmtAgo, fmtSpan, fmtClock, fmtMinutes, babyAge, dayKey, ringState,
 } from './util.js';
@@ -10,7 +11,7 @@ import {
   typeOf, userOf, toneStyle, activeTypes, trackedMetrics, summarize, alertFor,
 } from './ui.js';
 import {
-  nutritionOn, shownNutrients, totalNutrients, fmtNutrient,
+  nutritionOn, shownNutrients, totalNutrients, fmtNutrient, isIntake,
   referenceFor, referenceLine, nutrientMeta, tidy, milkFor, milkTypeIds,
 } from './nutrition.js';
 
@@ -100,48 +101,153 @@ function heroCard() {
     </div>`;
 }
 
+/* ------------------------------------------------------- nutrition window */
+
 /**
- * What today's cc actually amounted to. Volumes are multiplied by the milk
- * profile on each feed, so this only ever reflects feeds that recorded an
- * amount - it says so out loud rather than implying the baby ate less.
+ * The windows the Nutrition card offers.
+ *
+ * A rolling 24 hours rather than the calendar day: at 2 a.m. "today" is four
+ * feeds old and answers nothing. The longer windows report a daily average,
+ * which is the only form that can be held against a reference intake.
  */
-function nutritionToday() {
+export const NUTRITION_RANGES = [
+  { hours: 24, chip: '24h', name: 'last 24 hours' },
+  { hours: 72, chip: '3d', name: 'last 3 days' },
+  { hours: 168, chip: '7d', name: 'last 7 days' },
+  { hours: 720, chip: '30d', name: 'last 30 days' },
+];
+
+export const nutritionRange = () => (
+  NUTRITION_RANGES.find((r) => r.hours === state.nutritionHours) || NUTRITION_RANGES[0]
+);
+
+export const nutritionKey = () => `${state.babyId || 'all'}|${state.nutritionHours}`;
+
+/** The card's own slice of the log - /api/state only carries the last week. */
+export async function loadNutrition() {
+  const key = nutritionKey();
+  const hours = state.nutritionHours;
+  const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+  try {
+    const { events } = await api.events({
+      babyId: state.babyId || 'all', since, limit: 20000,
+    });
+    state.nutrition = { key, hours, events, loading: false, error: null };
+  } catch (err) {
+    state.nutrition = { ...state.nutrition, key, hours, loading: false, error: err.message };
+  }
+}
+
+/**
+ * Whether the log reaches back far enough to average over this window.
+ *
+ * Dividing six days of entries by thirty and calling the answer a daily average
+ * is how a chart lies, so a window the log cannot fill says so instead. The
+ * 24-hour view is exempt: a log that started this morning is not a problem, it
+ * is a new baby.
+ */
+function windowCoverage(hours) {
+  const first = state.data?.firstEventAt;
+  const logDays = first ? (Date.now() - new Date(first).getTime()) / 86_400_000 : 0;
+  return { enough: hours <= 24 || logDays >= hours / 24, logDays };
+}
+
+const rangeChips = () => `
+  <div class="seg mini" role="group" aria-label="How far back the nutrition figures look">
+    ${NUTRITION_RANGES.map((r) => `
+      <button data-act="nutrition-range" data-hours="${r.hours}"
+        aria-pressed="${r.hours === state.nutritionHours}">${r.chip}</button>`).join('')}
+  </div>`;
+
+/**
+ * What the milk in that window actually amounted to. Volumes are multiplied by
+ * the milk profile on each feed, so this only ever reflects feeds that recorded
+ * an amount - it says so out loud rather than implying the baby ate less.
+ */
+function nutritionCard() {
   const cfg = config();
   if (!nutritionOn(cfg)) return '';
   const shown = shownNutrients(cfg);
   if (!shown.length) return '';
 
-  const { totals, ml, counted, unmeasured } = totalNutrients(cfg, todaysEvents());
-  if (!counted) return '';
+  const range = nutritionRange();
+  const slice = state.nutrition;
+  const days = range.hours / 24;
   const baby = currentBaby();
   const weight = Number(baby?.weightKg) || 0;
-  const perKg = weight && totals.kcal ? `${(totals.kcal / weight).toFixed(0)} kcal/kg` : '';
 
-  return `
+  const shell = (sub, body) => `
     <div class="card" style="${toneStyle('lemon')}">
       <div class="row">
         <div style="font-size:1.5rem">🥣</div>
         <div class="grow" style="flex:1;min-width:0">
-          <div style="font-weight:800">Nutrition today</div>
-          <div class="small muted">${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}${perKg ? ` · ${esc(perKg)}` : ''}</div>
+          <div style="font-weight:800">Nutrition · ${esc(range.name)}</div>
+          ${sub ? `<div class="small muted">${sub}</div>` : ''}
         </div>
       </div>
-      <div class="stat-grid kpi">
-        ${shown.map((n) => {
-          const taken = totals[n.key] || 0;
-          return `
-          <button class="stat tappable" data-act="nutrient-info" data-key="${esc(n.key)}"
-            data-tip="${esc(`${n.label}: ${referenceLine(n.key, taken, baby)}`)}"
-            aria-label="${esc(`${n.label}. ${referenceLine(n.key, taken, baby)}. Tap for the reference figure.`)}">
-            <div class="v">${esc(fmtNutrient(n.key, taken).split(' ')[0])}</div>
-            <div class="k">${esc(n.label)} ${esc(n.unit)}</div>
-          </button>`;
-        }).join('')}
-      </div>
-      ${unmeasured ? `<p class="small muted" style="margin:10px 0 0">
-        ${unmeasured} feed${unmeasured === 1 ? '' : 's'} today had no volume recorded, so the real totals are higher.
-      </p>` : ''}
+      ${rangeChips()}
+      ${body}
     </div>`;
+
+  if (slice.error) {
+    return shell('', `<p class="small muted" style="margin:10px 0 0">${esc(slice.error)}</p>`);
+  }
+  if (slice.loading || slice.key !== nutritionKey()) {
+    return shell('', '<p class="small muted" style="margin:10px 0 0">Reading the log…</p>');
+  }
+
+  // Nothing logged for this baby at all: the Track screen already says so with
+  // its empty state, and an empty nutrition card would only be in the way.
+  if (!state.data?.firstEventAt) return '';
+
+  const cover = windowCoverage(range.hours);
+  if (!cover.enough) {
+    const kept = Math.floor(cover.logDays);
+    return shell('', `<p class="small muted" style="margin:10px 0 0">
+      <b>Not enough data.</b> The log only goes back ${kept < 1
+        ? 'less than a day'
+        : `${kept} day${kept === 1 ? '' : 's'}`}, so a ${days}-day average would be
+      inventing the rest of it.
+    </p>`);
+  }
+
+  const { totals, ml, counted, unmeasured } = totalNutrients(cfg, slice.events);
+  // Keep the Track screen quiet for anyone who never writes a volume down - but
+  // only for them. A quiet night with the last week full of measured feeds
+  // keeps the card, or the buttons for widening the window would disappear at
+  // exactly the moment they are wanted.
+  if (!counted && !eventsForBaby().some((e) => isIntake(cfg, e))) return '';
+
+  const perDay = (v) => (days > 1 ? v / days : v);
+  const kcalPerKg = weight && totals.kcal ? `${(perDay(totals.kcal) / weight).toFixed(0)} kcal/kg` : '';
+  const sub = days > 1
+    ? `Daily average over ${days} days · ${ml} cc from ${counted} measured feed${counted === 1 ? '' : 's'}${kcalPerKg ? ` · ${esc(kcalPerKg)}` : ''}`
+    : `${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}${kcalPerKg ? ` · ${esc(kcalPerKg)}` : ''}`;
+
+  if (!counted) {
+    return shell('', `<p class="small muted" style="margin:10px 0 0">
+      No feed in the ${esc(range.name)} had a volume written down, so there is nothing to work out yet.
+    </p>`);
+  }
+
+  const when = days > 1 ? 'a day on average' : 'in the last 24 hours';
+  return shell(sub, `
+    <div class="stat-grid kpi">
+      ${shown.map((n) => {
+        const taken = perDay(totals[n.key] || 0);
+        return `
+        <button class="stat tappable" data-act="nutrient-info" data-key="${esc(n.key)}"
+          data-tip="${esc(`${n.label}: ${referenceLine(n.key, taken, baby, when)}`)}"
+          aria-label="${esc(`${n.label}. ${referenceLine(n.key, taken, baby, when)}. Tap for the reference figure.`)}">
+          <div class="v">${esc(fmtNutrient(n.key, taken).split(' ')[0])}</div>
+          <div class="k">${esc(n.label)} ${esc(n.unit)}</div>
+        </button>`;
+      }).join('')}
+    </div>
+    ${unmeasured ? `<p class="small muted" style="margin:10px 0 0">
+      ${unmeasured} feed${unmeasured === 1 ? '' : 's'} in this window had no volume recorded, so the real
+      ${days > 1 ? 'average' : 'total'} is higher.
+    </p>` : ''}`);
 }
 
 /**
@@ -155,9 +261,14 @@ export function openNutrientSheet(key) {
   const meta = nutrientMeta(key);
   if (!meta) return;
 
-  const events = todaysEvents();
+  // The sheet reads whatever window the card is showing, so the number under
+  // the tile and the number in the sheet can never disagree.
+  const range = nutritionRange();
+  const days = range.hours / 24;
+  const events = state.nutrition.events;
   const { totals, ml, counted, unmeasured } = totalNutrients(cfg, events);
-  const taken = totals[key] || 0;
+  const perDay = (v) => (days > 1 ? v / days : v);
+  const taken = perDay(totals[key] || 0);
   const ref = referenceFor(key, baby);
   const pct = ref?.value ? Math.round((taken / ref.value) * 100) : null;
 
@@ -171,18 +282,20 @@ export function openNutrientSheet(key) {
     const per = Number(milk.per100?.[key]);
     if (!Number.isFinite(per)) continue;
     const cur = byMilk.get(milk.name) || { ml: 0, value: 0, emoji: milk.emoji };
-    cur.ml += amount;
-    cur.value += (per * amount) / 100;
+    cur.ml += amount / days;
+    cur.value += (per * amount) / 100 / days;
     byMilk.set(milk.name, cur);
   }
   const sources = [...byMilk.entries()].sort((a, b) => b[1].value - a[1].value);
 
   openSheet(`
-    <h3>${esc(meta.emoji)} ${esc(meta.label)} today</h3>
+    <h3>${esc(meta.emoji)} ${esc(meta.label)} · ${esc(range.name)}</h3>
 
     <div class="card" style="margin:0 0 12px;text-align:center">
       <div style="font-size:2.1rem;font-weight:900;line-height:1.1">${esc(fmtNutrient(key, taken))}</div>
-      <div class="small muted">from ${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}</div>
+      <div class="small muted">${days > 1
+        ? `a day on average, from ${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'} in ${days} days`
+        : `from ${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}`}</div>
       ${ref?.value !== null && ref?.value !== undefined ? `
         <div class="meter" role="img"
           aria-label="${esc(`${pct}% of the ${ref.kind || 'reference'} figure of ${tidy(ref.value)} ${meta.unit}`)}">
@@ -211,7 +324,7 @@ export function openNutrientSheet(key) {
       <label class="field"><span class="lab">Where it came from</span>
         ${sources.map(([name, v]) => `
           <div class="row" style="justify-content:space-between">
-            <span>${esc(v.emoji || '🍼')} ${esc(name)} <span class="muted small">${v.ml} cc</span></span>
+            <span>${esc(v.emoji || '🍼')} ${esc(name)} <span class="muted small">${Math.round(v.ml)} cc${days > 1 ? '/day' : ''}</span></span>
             <b>${esc(fmtNutrient(key, v.value))}</b>
           </div>`).join('')}
       </label>` : ''}
@@ -223,7 +336,7 @@ export function openNutrientSheet(key) {
       well-fed infants rather than setting a bar to clear, so being under one is
       not a deficiency and there is no prize for being over it.
       ${unmeasured ? `And this only counts feeds with a volume written down: ${unmeasured}
-        today had none, so the real total is higher than the number above.` : ''}
+        in this window had none, so the real figure is higher than the number above.` : ''}
       Anything that worries you belongs with your pediatrician, not a phone screen.
     </div>
 
@@ -333,7 +446,7 @@ export function renderTrack() {
   const cfg = config();
   if (!cfg.babies.length) return onboarding();
 
-  const status = `${heroCard()}${nutritionToday()}${timerCards()}${alarmStrip()}`;
+  const status = `${heroCard()}${nutritionCard()}${timerCards()}${alarmStrip()}`;
   const recent = recentStrip();
 
   return `

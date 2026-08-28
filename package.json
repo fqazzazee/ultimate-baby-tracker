@@ -1,6 +1,6 @@
 {
   "name": "ultimate-baby-tracker",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "displayName": "Ultimate Baby Tracker",
   "description": "One-tap newborn tracker: feeds, diapers, sleep, custom buttons and programmable alarms. Zero dependencies, plain-text storage.",
   "type": "module",

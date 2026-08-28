@@ -158,6 +158,7 @@ function buildState(url) {
     timers: store.listTimers(),
     alarms: computeAlarmInstances(config),
     totalEvents: store.eventCount(),
+    firstEventAt: store.firstEventAt(babyId),
   };
 }
 

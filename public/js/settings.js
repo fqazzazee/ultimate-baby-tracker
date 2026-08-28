@@ -1187,6 +1187,7 @@ export function openMilkSheet(milkId = null) {
     ${segField('How your label states them', 'basis', 'ml', [
       { value: 'ml', label: 'per 100 mL' },
       { value: 'kcal', label: 'per 100 Cal' },
+      { value: 'bottle', label: 'per 5 fl oz' },
     ])}
     <p class="small muted" style="margin:-6px 0 10px" data-basis-hint>
       Copy the numbers straight off the panel. Leave anything you do not care
@@ -1209,7 +1210,7 @@ export function openMilkSheet(milkId = null) {
         <div class="row">
           <input type="number" data-per100="${esc(x.key)}" inputmode="decimal" min="0" step="0.01"
                  value="${esc(milk.per100?.[x.key] ?? '')}" placeholder="0">
-          <span class="muted small">${esc(x.unit)}</span>
+          <span class="muted small" data-unit="${esc(x.key)}">${esc(x.unit)}</span>
         </div>
       </label>`).join('')}
     <p class="small muted" data-converted hidden></p>
@@ -1228,45 +1229,67 @@ export function openMilkSheet(milkId = null) {
     const hint = sheet.querySelector('[data-basis-hint]');
     const preview = sheet.querySelector('[data-converted]');
 
-    /** Prepared kcal per 100 mL, from the Calories-per-fl-oz on the label. */
+    // What a US label means by one bottle: "each 5 fl oz (150 mL) contains 100
+    // Calories". The label's own rounding of 5 fl oz, and the number to divide
+    // its per-100-Calorie column by.
+    const BOTTLE_ML = 150;
+
+    /** Prepared kcal per 100 mL, whichever way the label got there. */
     const kcalPer100ml = () => {
+      if (basisInput.value === 'bottle') return (100 / BOTTLE_ML) * 100;
       const perOz = Number(sheet.querySelector('[data-meta="kcalPerOz"]').value) || 20;
       return (perOz / 29.5735) * 100;
     };
 
     /**
-     * Everything is stored per 100 mL. A US panel states nutrients per 100
-     * Calories, so those get scaled by kcal-per-100-mL / 100 on the way in -
-     * the step that, done by hand and forgotten, overstates a formula's iron
-     * and DHA by about half.
+     * Everything is stored per 100 mL.
+     *
+     * A US panel states nutrients per 100 Calories, so those get scaled by
+     * kcal-per-100-mL / 100 on the way in - the step that, done by hand and
+     * forgotten, overstates a formula's iron and DHA by about half. The
+     * per-bottle basis is the same column read through the label's own
+     * equivalence, which makes the factor exactly 100/150.
+     *
+     * Vitamin D is the other trap: a per-100-Calorie panel prints it in IU
+     * where a per-100-mL one prints micrograms, so a label basis divides by 40.
      */
     const readPer100 = () => {
-      const perKcal = basisInput.value === 'kcal';
-      const energy = perKcal ? kcalPer100ml() : null;
-      const factor = perKcal ? energy / 100 : 1;
+      const perLabel = basisInput.value !== 'ml';
+      const energy = perLabel ? kcalPer100ml() : null;
+      const factor = perLabel ? energy / 100 : 1;
       const out = {};
       sheet.querySelectorAll('[data-per100]').forEach((el) => {
         const key = el.dataset.per100;
-        if (perKcal && key === 'kcal') return;      // 100 per 100 Cal, by definition
+        if (perLabel && key === 'kcal') return;     // 100 per 100 Cal, by definition
         if (el.value === '') return;
-        out[key] = Math.round(Number(el.value) * factor * 1000) / 1000;
+        let value = Number(el.value) * factor;
+        if (perLabel && key === 'vitaminD') value /= 40;
+        out[key] = Math.round(value * 1000) / 1000;
       });
-      if (perKcal) out.kcal = Math.round(energy * 10) / 10;
+      if (perLabel) out.kcal = Math.round(energy * 10) / 10;
       return out;
     };
 
+    const HINTS = {
+      ml: 'Copy the numbers straight off the panel. Leave anything you do not care about blank.',
+      kcal: 'US labels state everything per 100 Calories. Type the numbers exactly as printed — this converts them to per 100 mL for you, vitamin D from IU included.',
+      bottle: 'For a label that says "diluted: each 5 fl oz (150 mL) contains 100 calories" — one bottle is one 100-Calorie column. Type the numbers exactly as printed; they are stored per 100 mL, and each feed is worked out from the cc you log.',
+    };
+
     const paint = () => {
-      const perKcal = basisInput.value === 'kcal';
-      kcalRow.classList.toggle('hidden', !perKcal);
-      energyRow.classList.toggle('hidden', perKcal);
-      hint.textContent = perKcal
-        ? 'US labels state everything per 100 Calories. Type the numbers exactly as printed — this converts them to per 100 mL for you.'
-        : 'Copy the numbers straight off the panel. Leave anything you do not care about blank.';
+      const basis = basisInput.value;
+      const perLabel = basis !== 'ml';
+      kcalRow.classList.toggle('hidden', basis !== 'kcal');
+      energyRow.classList.toggle('hidden', perLabel);
+      hint.textContent = HINTS[basis] || HINTS.ml;
+      // A per-100-Calorie panel prints vitamin D in IU; say so on the field.
+      const vitD = sheet.querySelector('[data-unit="vitaminD"]');
+      if (vitD) vitD.textContent = perLabel ? 'IU' : 'µg';
       const per100 = readPer100();
-      preview.hidden = !perKcal;
-      if (perKcal) {
+      preview.hidden = !perLabel;
+      if (perLabel) {
         preview.textContent = `Stored as ${per100.kcal ?? '—'} kcal, ${per100.iron ?? '—'} mg iron, `
-          + `${per100.dha ?? '—'} mg DHA per 100 mL.`;
+          + `${per100.vitaminD ?? '—'} µg vitamin D and ${per100.dha ?? '—'} mg DHA per 100 mL.`;
       }
     };
 
