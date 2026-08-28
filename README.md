@@ -2,11 +2,11 @@
 
 [![Ultimate Baby Tracker: one tap at 3am, answers at the check-up — the Track screen on a laptop and a phone, a month of daily intake in Stats, and editable formula profiles in Setup](docs/slide/slide.png)](https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/)
 
-**Self-hosted**, **offline**, one-tap tracking for a newborn: feeds, diapers, sleep, baths, medicine, and
+One-tap tracking for a newborn: feeds, diapers, sleep, baths, medicine, and
 anything else you care to invent. Renders and works on modern web browsers from your notebook, 
 workstation and phone.
 
-No accounts, no cloud, no build step, no dependencies. Your entries stay on your
+**Self-hosted**, **offline**, No accounts, no cloud, no build step, no dependencies. Your entries stay on your
 machine as plain text you can read.
 
 ## Install
@@ -114,10 +114,6 @@ alarms.json    snooze / last-fired state
   platform, what an update does
 - **[Security](SECURITY.md)** — **read this before exposing it to anything**
 - **[Changelog](CHANGELOG.md)**
-- **[The slide above](https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/)** — served live from this
-  repository. Edit [`docs/slide/index.html`](docs/slide/index.html) — the copy,
-  the colours, the screenshots — then run `node scripts/render-slide.mjs` to
-  redraw `docs/slide/slide.png`.
 
 > **No authentication and no encryption.** It was never designed to have any.
 > Keep it on a trusted network — see [SECURITY.md](SECURITY.md).
