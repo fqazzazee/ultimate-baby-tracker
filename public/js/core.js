@@ -20,6 +20,11 @@ export const state = {
   historyType: 'all',
   historyDays: 7,
   statsDays: store.get('statsDays', 14),
+  // The nutrition card on Track reads a rolling window rather than the calendar
+  // day, and a month of it is more than /api/state carries - so, like the
+  // Statistics screen, it keeps its own slice of the log.
+  nutritionHours: store.get('nutritionHours', 24),
+  nutrition: { key: null, hours: 24, events: [], loading: true, error: null },
   // The Statistics screen reads a longer window than /api/state carries, so it
   // keeps its own slice of the log, fetched only while that tab is open.
   stats: { days: 0, events: [], loading: true, error: null },

@@ -59,11 +59,16 @@ a pointer at all.
 Every bottle already records how many cc went in. Give the app the nutrition
 panel off the tin and it can say what those cc actually amounted to.
 
-**Setup → Nutrition** holds the milk profiles. Eight ship with the app — breast
-milk, Bobbie, Similac, Enfamil, Kirkland, Earth's Best, HiPP and whole cow's
-milk — each carrying its label values per 100 mL of *prepared* feed. Add your
-own with **➕ Add a milk or formula**, or open any of them and correct the
-numbers.
+**Setup → Nutrition** holds the milk profiles. Nine ship with the app — breast
+milk, Bobbie Organic Original, Bobbie Organic Whole Milk, Similac, Enfamil,
+Kirkland, Earth's Best, HiPP and whole cow's milk — each carrying its label
+values per 100 mL of *prepared* feed. Add your own with **➕ Add a milk or
+formula**, or open any of them and correct the numbers.
+
+The two Bobbie profiles are taken straight off Bobbie's own panels for the
+14.1 oz cans, which state *"diluted: each 5 fl oz (150 mL) contains 100
+calories"* over a per-100-Calorie table. Bobbie's 24 oz and 12.7 oz cans of the
+Original are a different recipe — check the tin.
 
 > Treat the built-in profiles as a starting point, not gospel. They are rounded
 > label values, brands reformulate without warning, and a European stage 1 is
@@ -73,10 +78,21 @@ numbers.
 nutrients **per 100 Calories**, not per 100 mL — so a panel reading "1.2 mg
 iron" means 1.2 mg per 100 kcal, which at 20 Cal/fl oz works out to 0.81 mg per
 100 mL. Getting that wrong overstates a formula's iron and DHA by about half.
-The milk editor has a **per 100 mL / per 100 Cal** switch for exactly this: pick
-*per 100 Cal*, give it the Calories per fl oz off the panel, then type every
-number exactly as printed and it converts them for you. European tins usually
-print per 100 mL of made-up feed, so those go in as they are.
+The milk editor has a three-way switch for exactly this, and whichever you pick
+you type the numbers **exactly as printed**:
+
+| Switch | For a label that says | What it does |
+| --- | --- | --- |
+| **per 100 mL** | European tins, per 100 mL of made-up feed | takes them as they are |
+| **per 100 Cal** | a US per-100-Calorie table | scales by the Calories per fl oz you give it |
+| **per 5 fl oz** | *"diluted: each 5 fl oz (150 mL) contains 100 calories"* | reads that column as one 150 mL bottle and divides by 1.5 |
+
+The per-bottle switch is the one for Bobbie and most US formulas: the label's own
+sentence ties one 100-Calorie column to one 5 fl oz bottle, so no Calories-per-oz
+guess is needed. Either label basis also converts **vitamin D from IU**, which
+is how a per-100-Calorie panel prints it — the field says `IU` while you are on
+one. Everything is stored per 100 mL, and each feed is worked out from the cc
+you log.
 
 Once it is on:
 
@@ -88,7 +104,12 @@ Once it is on:
   name a switched-off profile keep their numbers and still show it when you
   open them, so putting a finished tin away rewrites nothing. One profile
   always has to stay on.
-- A **Nutrition today** card appears on the Track screen with running totals.
+- A **Nutrition** card appears on the Track screen covering the **last 24
+  hours** — a rolling window, because at 2 a.m. "today" is four feeds old and
+  answers nothing. Mini buttons on it switch to **3 days, 7 days or 30 days**,
+  which report a *daily average* rather than a total: that is the only form a
+  reference intake can be held against. A window the log cannot fill says
+  **"not enough data"** instead of dividing four days of entries by thirty.
 - **Setup → Nutrition → Show these nutrients** decides which of the nine —
   energy, protein, fat, carbs, iron, calcium, vitamin D, DHA and sodium — get a
   tile. The rest stay recorded and simply are not shown.
@@ -96,7 +117,8 @@ Once it is on:
   figures, which is usually the form the question gets asked in.
 - **Tap any tile** for the whole story on that nutrient: how much has gone in,
   the reference intake for a baby that age, which milks contributed it, and why
-  that reference is not a target. Hovering gives the one-line version.
+  that reference is not a target. It follows whichever window the card is set
+  to, so the two can never disagree. Hovering gives the one-line version.
 
 Only feeds with a recorded volume can be counted — a nursing session you timed
 but did not measure has no cc to scale — so both the card and the charts say

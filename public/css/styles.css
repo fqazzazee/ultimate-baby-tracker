@@ -610,6 +610,10 @@ input:focus, select:focus, textarea:focus {
   color: var(--text);
   box-shadow: var(--shadow-sm);
 }
+/* The window picker on the Nutrition card rides inside a card that is already
+   busy, so it is smaller than a full segmented control - still a 36px target. */
+.seg.mini { margin-top: 10px; padding: 3px; }
+.seg.mini button { min-height: 36px; font-size: .82rem; }
 
 /* Colour picker swatches */
 .swatch-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2); }

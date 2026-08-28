@@ -267,12 +267,15 @@ export function tidy(n, dp = 2) {
   return Number(n.toFixed(dp)).toString();
 }
 
-/** The one-line version, for a hover tip. */
-export function referenceLine(key, taken, baby) {
+/**
+ * The one-line version, for a hover tip. `when` names the window the figure
+ * came from, so a 7-day card says "a day on average" rather than "today".
+ */
+export function referenceLine(key, taken, baby, when = 'so far today') {
   const ref = referenceFor(key, baby);
   const meta = nutrientMeta(key);
   if (!meta) return '';
-  const got = `${taken.toFixed(meta.dp)} ${meta.unit} so far today`;
+  const got = `${taken.toFixed(meta.dp)} ${meta.unit} ${when}`;
   if (!ref) return got;
   if (ref.value === null) {
     // Two different silences: energy needs a weight, DHA has no figure at all.
