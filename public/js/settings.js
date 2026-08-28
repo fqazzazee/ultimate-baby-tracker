@@ -9,10 +9,10 @@ import * as sound from './sound.js';
 import { esc, uid, babyAge } from './util.js';
 import {
   TONES, GENDER_TEMPLATES, BABY_EMOJI, PERSON_EMOJI, TYPE_EMOJI,
-  toneStyle, activeTypes, typeOf, fieldsHTML, collectFields, wireFieldControls,
+  toneStyle, activeTypes, trackedMetrics, typeOf, fieldsHTML, collectFields, wireFieldControls,
 } from './ui.js';
 import {
-  NUTRIENTS, MILK_KINDS, nutritionOn, milkById, milkSummary,
+  NUTRIENTS, MILK_KINDS, nutritionOn, milkById, milkEnabled, enabledMilks, milkSummary,
 } from './nutrition.js';
 
 /* ------------------------------------------------------------ tiny pickers */
@@ -888,26 +888,36 @@ export function renderSetup() {
       <div class="section-title">Tracked metrics</div>
       <p class="small muted" style="margin:-4px 4px 10px">
         Tick what you want to keep track of. Unticking hides that card from the
-        Track screen and drops it from the History filters — nothing already
-        logged is deleted, and ticking it again brings everything back.
+        Track screen, its tile from the overview and its chart from Statistics,
+        and drops it from the History filters — nothing already logged is
+        deleted, and ticking it again brings everything back.
+        <b>Drag ⠿ to reorder</b>: this is the order the cards appear in on the
+        Track screen. With the grip focused, ↑ and ↓ do the same thing.
       </p>
-      ${(cfg.eventTypes || []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999)).map((t) => `
-        <div class="list-item" style="${toneStyle(t.tone)};${t.archived ? 'opacity:.55' : ''}">
-          <label class="switch" style="padding:0;min-height:auto" title="${t.archived ? 'Not tracked' : 'Tracked'}">
-            <input type="checkbox" data-act="toggle-type" data-id="${esc(t.id)}" ${t.archived ? '' : 'checked'}
-                   aria-label="Track ${esc(t.label)}">
-            <span class="track"></span>
-          </label>
-          <div style="font-size:1.6rem">${esc(t.emoji)}</div>
-          <div class="grow">
-            <b>${esc(t.label)}</b>
-            <div class="small muted">${t.mode === 'timer' ? '⏱️ timer' : '⚡ one tap'} · ${(t.presets || []).length} button(s)${t.archived ? ' · not tracked' : ''}</div>
-          </div>
-          <button class="btn sm" data-act="edit-type" data-id="${esc(t.id)}">Edit</button>
-        </div>`).join('')}
+      <div data-reorder="types">
+        ${(cfg.eventTypes || []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999)).map((t) => `
+          <div class="list-item reorder-row" data-reorder-id="${esc(t.id)}"
+               style="${toneStyle(t.tone)};${t.archived ? 'opacity:.55' : ''}">
+            <button type="button" class="grip" data-grip
+              aria-label="Reorder ${esc(t.label)}" title="Drag to reorder, or use the arrow keys">⠿</button>
+            <label class="switch" style="padding:0;min-height:auto" title="${t.archived ? 'Not tracked' : 'Tracked'}">
+              <input type="checkbox" data-act="toggle-type" data-id="${esc(t.id)}" ${t.archived ? '' : 'checked'}
+                     aria-label="Track ${esc(t.label)}">
+              <span class="track"></span>
+            </label>
+            <div style="font-size:1.6rem">${esc(t.emoji)}</div>
+            <div class="grow">
+              <b>${esc(t.label)}</b>
+              <div class="small muted">${t.mode === 'timer' ? '⏱️ timer' : '⚡ one tap'} · ${(t.presets || []).length} button${(t.presets || []).length === 1 ? '' : 's'}${t.archived ? ' · not tracked' : ''}</div>
+            </div>
+            <button class="btn sm" data-act="edit-type" data-id="${esc(t.id)}">Edit</button>
+          </div>`).join('')}
+      </div>
       <button class="btn wide" data-act="add-type">➕ New button</button>
 
       ${nutritionCard(cfg)}
+
+      ${statsCard(cfg)}
 
       <div class="section-title">Look &amp; feel</div>
       <div class="card">
@@ -952,6 +962,140 @@ export function renderSetup() {
     </div>`;
 }
 
+/* ------------------------------------------------------------ statistics */
+
+/**
+ * Which history charts the Statistics screen draws.
+ *
+ * A metric nobody is tracking has no chart to switch, so its row says what it
+ * is waiting for and the switch is disabled rather than quietly doing nothing.
+ * The nutrient charts have their own list under Nutrition and are not repeated
+ * here.
+ */
+function statsCard(cfg) {
+  const on = trackedMetrics(cfg);
+  const want = cfg.stats?.charts || {};
+  const rows = [
+    { key: 'intake', label: 'Milk in', hint: 'cc per day from measured feeds', on: on.feeds, needs: 'a feed button' },
+    { key: 'feeds', label: 'Feeds', hint: 'How often, measured or not', on: on.feeds, needs: 'a feed button' },
+    { key: 'diapers', label: 'Diapers', hint: 'Wet and dirty side by side', on: on.diapers, needs: 'the diaper button' },
+    { key: 'sleep', label: 'Sleep', hint: 'Hours from timed sleeps', on: on.sleep, needs: 'the sleep button' },
+    { key: 'pump', label: 'Pumped', hint: 'cc expressed per day', on: on.pump, needs: 'the pump button' },
+    { key: 'clock', label: 'When feeds happen', hint: 'Every feed by hour of the day', on: on.feeds, needs: 'a feed button' },
+  ];
+
+  return `
+    <div class="section-title">Statistics</div>
+    <div class="card">
+      <p class="small muted" style="margin-top:0">
+        Which charts the Stats screen draws. Switching one off hides the drawing
+        and nothing else — the entries behind it are untouched and the headline
+        tiles stay. Which nutrient charts appear follows
+        <b>Nutrition → Show these nutrients</b>.
+      </p>
+      ${rows.map((r) => (r.on
+        ? switchRow(r.label, r.hint, `stats.charts.${r.key}`, want[r.key] !== false)
+        : `<label class="switch" style="opacity:.55">
+            <input type="checkbox" disabled ${want[r.key] !== false ? 'checked' : ''}>
+            <span class="track"></span>
+            <span class="txt"><b>${esc(r.label)}</b>
+              <span class="small muted">Needs ${esc(r.needs)} under Tracked metrics</span></span>
+          </label>`)).join('')}
+    </div>`;
+}
+
+/* --------------------------------------------------------- drag to reorder */
+
+/**
+ * Drag-to-reorder for a list of rows carrying `data-reorder-id`.
+ *
+ * Pointer events rather than HTML5 drag-and-drop, which does not fire on touch
+ * at all - and this list is used on a phone more than anywhere else. The grip
+ * takes `touch-action: none` in the stylesheet so dragging it does not scroll
+ * the page underneath. Arrow keys on a focused grip move the row one place, so
+ * the order is reachable without a pointer at all.
+ *
+ * `commit` is handed the new order of ids, and the id to put focus back on when
+ * the keyboard did the moving - saving re-renders the whole screen.
+ */
+function enableReorder(list, commit) {
+  const ROW = '.reorder-row';
+  const order = () => [...list.querySelectorAll(ROW)].map((r) => r.dataset.reorderId);
+  let drag = null;
+
+  /** Keep the dragged row under the pointer, wherever the DOM has moved it to. */
+  const paint = (clientY) => {
+    drag.row.style.transform = '';
+    const natural = drag.row.getBoundingClientRect().top;
+    drag.row.style.transform = `translateY(${(clientY - drag.grab - natural).toFixed(1)}px)`;
+  };
+
+  /** Step past any neighbour whose midpoint the dragged row has crossed. */
+  const settle = (clientY) => {
+    for (let guard = 0; guard < 40; guard += 1) {
+      paint(clientY);
+      const box = drag.row.getBoundingClientRect();
+      const prev = drag.row.previousElementSibling;
+      if (prev?.matches(ROW)) {
+        const p = prev.getBoundingClientRect();
+        if (box.top < p.top + p.height / 2) { list.insertBefore(drag.row, prev); continue; }
+      }
+      const next = drag.row.nextElementSibling;
+      if (next?.matches(ROW)) {
+        const n = next.getBoundingClientRect();
+        if (box.bottom > n.top + n.height / 2) { list.insertBefore(next, drag.row); continue; }
+      }
+      return;
+    }
+  };
+
+  list.addEventListener('pointerdown', (ev) => {
+    const grip = ev.target.closest('[data-grip]');
+    if (!grip || ev.button > 0) return;
+    const row = grip.closest(ROW);
+    if (!row) return;
+    ev.preventDefault();
+    grip.setPointerCapture(ev.pointerId);
+    drag = {
+      row, id: ev.pointerId, from: order(),
+      grab: ev.clientY - row.getBoundingClientRect().top,
+    };
+    row.classList.add('dragging');
+    list.classList.add('reordering');
+  });
+
+  list.addEventListener('pointermove', (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    ev.preventDefault();
+    settle(ev.clientY);
+  });
+
+  const drop = (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    const { row, from } = drag;
+    drag = null;
+    row.style.transform = '';
+    row.classList.remove('dragging');
+    list.classList.remove('reordering');
+    const now = order();
+    if (now.join() !== from.join()) commit(now, null);
+  };
+  list.addEventListener('pointerup', drop);
+  list.addEventListener('pointercancel', drop);
+
+  list.addEventListener('keydown', (ev) => {
+    const grip = ev.target.closest('[data-grip]');
+    if (!grip || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+    const row = grip.closest(ROW);
+    const up = ev.key === 'ArrowUp';
+    const mate = up ? row.previousElementSibling : row.nextElementSibling;
+    if (!row || !mate?.matches(ROW)) return;
+    ev.preventDefault();
+    if (up) list.insertBefore(row, mate); else list.insertBefore(mate, row);
+    commit(order(), row.dataset.reorderId);
+  });
+}
+
 /* ------------------------------------------------------------- nutrition */
 
 /**
@@ -972,7 +1116,7 @@ function nutritionCard(cfg) {
       ${on ? `
         <label class="field"><span class="lab">Assume this when nothing is picked</span>
           <div class="preset-row" role="group" aria-label="Default milk">
-            ${milks.map((m) => `
+            ${enabledMilks(cfg).map((m) => `
               <button type="button" class="btn sm" data-act="set-default-milk" data-id="${esc(m.id)}"
                 aria-pressed="${m.id === n.defaultMilkId}"
                 style="${m.id === n.defaultMilkId ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${esc(m.emoji || '🍼')} ${esc(m.name)}</button>`).join('')}
@@ -994,12 +1138,23 @@ function nutritionCard(cfg) {
     </div>
 
     ${on ? `
+      <p class="small muted" style="margin:0 4px 10px">
+        Untick anything you are not using and it stops being offered on the
+        Bottle card and in the default picker above. Entries that already name
+        it keep their numbers, so a tin you have finished can be put away
+        without rewriting a single feed.
+      </p>
       ${milks.map((m) => `
-        <div class="list-item">
+        <div class="list-item" style="${milkEnabled(m) ? '' : 'opacity:.55'}">
+          <label class="switch" style="padding:0;min-height:auto" title="${milkEnabled(m) ? 'Offered' : 'Not offered'}">
+            <input type="checkbox" data-act="toggle-milk" data-id="${esc(m.id)}" ${milkEnabled(m) ? 'checked' : ''}
+                   aria-label="Offer ${esc(m.name)}">
+            <span class="track"></span>
+          </label>
           <div style="font-size:1.6rem">${esc(m.emoji || '🍼')}</div>
           <div class="grow">
             <b>${esc(m.name)}</b>${m.id === cfg.nutrition.defaultMilkId ? ' <span class="pill">default</span>' : ''}
-            <div class="small muted">${milkSummary(m)}</div>
+            <div class="small muted">${milkSummary(m)}${milkEnabled(m) ? '' : ' · not offered'}</div>
           </div>
           <button class="btn sm" data-act="edit-milk" data-id="${esc(m.id)}">Edit</button>
         </div>`).join('')}
@@ -1135,6 +1290,7 @@ export function openMilkSheet(milkId = null) {
         emoji: sheet.querySelector('[data-meta="emoji"]').value || '🍼',
         kind: sheet.querySelector('[data-meta="kind"]').value,
         builtin: !!milk.builtin,
+        enabled: milkEnabled(milk),
         per100,
       };
       closeSheet();
@@ -1226,6 +1382,21 @@ function writeSetting(cfg, name, value) {
 
 /** Settings toggles/sliders are wired once, on the delegated container. */
 export function wireSetup(root) {
+  const list = root.querySelector('[data-reorder="types"]');
+  if (list) {
+    enableReorder(list, async (ids, focusId) => {
+      await saveConfig((cfg) => {
+        // Tens, so a hand-edited config.json still has room between two cards.
+        ids.forEach((id, i) => {
+          const t = cfg.eventTypes.find((x) => x.id === id);
+          if (t) t.order = (i + 1) * 10;
+        });
+      });
+      sound.play('pop');
+      if (focusId) root.querySelector(`[data-reorder-id="${CSS.escape(focusId)}"] [data-grip]`)?.focus();
+    });
+  }
+
   root.querySelectorAll('[data-setting]').forEach((el) => {
     el.addEventListener('change', () => {
       saveConfig((cfg) => writeSetting(cfg, el.dataset.setting, el.checked));

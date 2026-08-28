@@ -13,7 +13,7 @@
 import { state, config, currentBaby } from './core.js';
 import { api } from './api.js';
 import { esc, fmtMinutes } from './util.js';
-import { activeTypes } from './ui.js';
+import { trackedMetrics } from './ui.js';
 import {
   columnChart, groupedColumnChart, legend, tableTwin, chartCard,
 } from './charts.js';
@@ -27,15 +27,20 @@ import {
  */
 export const STATS_RANGES = [1, 3, 7, 14, 30, 90];
 
-/** Which cards have anything to say, given what Setup is set to track. */
-function trackedMetrics(cfg) {
-  const active = new Set(activeTypes(cfg).map((t) => t.id));
-  const milk = [...milkTypeIds(cfg)].filter((id) => active.has(id));
+/**
+ * Which charts the user asked for, from Setup -> Statistics. Absent means on,
+ * so a config written before these switches existed keeps every chart.
+ */
+function chartPrefs(cfg) {
+  const want = cfg?.stats?.charts || {};
+  const on = (key) => want[key] !== false;
   return {
-    milk: new Set(milk),
-    feeds: milk.length > 0,
-    diapers: active.has('diaper'),
-    sleep: active.has('sleep'),
+    intake: on('intake'),
+    feeds: on('feeds'),
+    diapers: on('diapers'),
+    sleep: on('sleep'),
+    pump: on('pump'),
+    clock: on('clock'),
   };
 }
 
@@ -101,7 +106,10 @@ export async function loadStats() {
 }
 
 const emptyBucket = () => ({
-  values: { ml: 0, feeds: 0, wet: 0, dirty: 0, sleepMin: 0, longestSleep: 0, unmeasured: 0 },
+  values: {
+    ml: 0, feeds: 0, wet: 0, dirty: 0, sleepMin: 0, longestSleep: 0, unmeasured: 0,
+    pumpMl: 0, pumps: 0,
+  },
   nutrients: {},
 });
 
@@ -133,6 +141,12 @@ function tally(cfg, milkIds, bucket, event) {
     const mins = Number(d.duration) || 0;
     v.sleepMin += mins;
     v.longestSleep = Math.max(v.longestSleep, mins);
+  }
+  // Pumping is milk coming out, never in: it is counted here and nowhere near
+  // the intake or nutrient totals.
+  if (event.typeId === 'pump') {
+    v.pumps += 1;
+    v.pumpMl += Number(d.amount) || 0;
   }
 }
 
@@ -248,7 +262,7 @@ function clockRows(cfg, events, width) {
 function averages(rows, hourly) {
   const done = !hourly && rows.length > 1 ? rows.slice(0, -1) : rows;
   const withData = done.filter((r) => r.values.feeds || r.values.wet
-    || r.values.dirty || r.values.sleepMin);
+    || r.values.dirty || r.values.sleepMin || r.values.pumps);
   const base = withData.length || 1;
   const sum = (pick) => done.reduce((a, r) => a + pick(r), 0);
 
@@ -266,6 +280,8 @@ function averages(rows, hourly) {
     wet: sum((r) => r.values.wet) / base,
     dirty: sum((r) => r.values.dirty) / base,
     sleepMin: sum((r) => r.values.sleepMin) / base,
+    pumpMl: sum((r) => r.values.pumpMl) / base,
+    pumps: sum((r) => r.values.pumps) / base,
     longestSleep: Math.max(0, ...done.map((r) => r.values.longestSleep)),
     nutrients,
     kcal: nutrients.kcal || 0,
@@ -274,9 +290,12 @@ function averages(rows, hourly) {
 
 /** Totals across the whole slice, which is what a one-day view wants to show. */
 function totals(rows) {
-  const out = { ml: 0, feeds: 0, wet: 0, dirty: 0, sleepMin: 0, longestSleep: 0, unmeasured: 0, nutrients: {} };
+  const out = {
+    ml: 0, feeds: 0, wet: 0, dirty: 0, sleepMin: 0, longestSleep: 0, unmeasured: 0,
+    pumpMl: 0, pumps: 0, nutrients: {},
+  };
   for (const r of rows) {
-    for (const k of ['ml', 'feeds', 'wet', 'dirty', 'sleepMin', 'unmeasured']) out[k] += r.values[k];
+    for (const k of ['ml', 'feeds', 'wet', 'dirty', 'sleepMin', 'unmeasured', 'pumpMl', 'pumps']) out[k] += r.values[k];
     out.longestSleep = Math.max(out.longestSleep, r.values.longestSleep);
     for (const [k, v] of Object.entries(r.nutrients)) out.nutrients[k] = (out.nutrients[k] || 0) + v;
   }
@@ -343,12 +362,13 @@ export function renderStats() {
   const sum = totals(rows);
   const weight = Number(baby.weightKg) || 0;
   const on = trackedMetrics(cfg);
+  const charts = chartPrefs(cfg);
   const nutrition = nutritionOn(cfg) && on.feeds;
 
   // A one-day view reports today's totals; a longer one reports the daily mean.
   const head = hourly
     ? { ml: sum.ml, feeds: sum.feeds, wet: sum.wet, dirty: sum.dirty, sleepMin: sum.sleepMin,
-        longestSleep: sum.longestSleep, kcal: sum.nutrients.kcal || 0 }
+        pumpMl: sum.pumpMl, longestSleep: sum.longestSleep, kcal: sum.nutrients.kcal || 0 }
     : avg;
   const per = hourly ? 'today' : '/ day';
 
@@ -369,6 +389,7 @@ export function renderStats() {
           ${on.sleep ? statTile(`Sleep ${per}`, head.sleepMin ? fmtMinutes(Math.round(head.sleepMin)) : '—', head.longestSleep ? `best ${fmtMinutes(head.longestSleep)}` : '') : ''}
           ${on.diapers ? statTile(`Wet ${per}`, head.wet ? head.wet.toFixed(hourly ? 0 : 1) : '—', '') : ''}
           ${on.diapers ? statTile(`Dirty ${per}`, head.dirty ? head.dirty.toFixed(hourly ? 0 : 1) : '—', '') : ''}
+          ${on.pump ? statTile(`cc pumped ${per}`, head.pumpMl ? Math.round(head.pumpMl) : '—', '') : ''}
           ${nutrition ? statTile(`kcal ${per}`, head.kcal ? Math.round(head.kcal) : '—', weight && head.kcal ? `${(head.kcal / weight).toFixed(0)} kcal/kg` : '') : ''}
         </div>
         <p class="small muted" style="margin:12px 0 0">
@@ -377,14 +398,15 @@ export function renderStats() {
         </p>
       </div>
 
-      ${on.feeds ? intakeChart(rows, avg, width, weight, hourly) : ''}
-      ${on.feeds ? feedCountChart(rows, avg, width, hourly) : ''}
-      ${on.diapers ? diaperChart(rows, width, hourly) : ''}
-      ${on.sleep ? sleepChart(rows, avg, width, hourly) : ''}
+      ${on.feeds && charts.intake ? intakeChart(rows, avg, width, weight, hourly) : ''}
+      ${on.feeds && charts.feeds ? feedCountChart(rows, avg, width, hourly) : ''}
+      ${on.diapers && charts.diapers ? diaperChart(rows, width, hourly) : ''}
+      ${on.sleep && charts.sleep ? sleepChart(rows, avg, width, hourly) : ''}
+      ${on.pump && charts.pump ? pumpChart(rows, avg, width, hourly) : ''}
       ${nutrition ? nutrientCharts(cfg, rows, avg, width, baby, hourly) : ''}
-      ${on.feeds && !hourly ? clockChart(cfg, state.stats.events, width) : ''}
+      ${on.feeds && charts.clock && !hourly ? clockChart(cfg, state.stats.events, width) : ''}
 
-      ${untrackedNote(cfg, on)}
+      ${untrackedNote(on, charts)}
 
       <div class="notice" style="border-color:color-mix(in srgb,var(--muted) 40%,transparent);background:var(--surface-2);color:var(--text)">
         <b>📋 What to bring to the appointment</b>
@@ -397,18 +419,41 @@ export function renderStats() {
     </div>`;
 }
 
-/** Say plainly which charts are missing because Setup is not tracking them. */
-function untrackedNote(cfg, on) {
+/**
+ * Say plainly which charts are missing, and which of the two switches did it -
+ * a metric nobody is tracking, or a chart turned off on a screen that was
+ * getting long. Either way the entries are still there.
+ */
+function untrackedNote(on, charts) {
+  const list = (items) => (items.length === 1
+    ? items[0]
+    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
+
   const off = [];
   if (!on.feeds) off.push('feeds');
   if (!on.diapers) off.push('diapers');
   if (!on.sleep) off.push('sleep');
-  if (!off.length) return '';
-  const list = off.length === 1 ? off[0] : `${off.slice(0, -1).join(', ')} and ${off[off.length - 1]}`;
-  return `<p class="small muted" style="margin:0 4px 14px">
-    Charts for ${esc(list)} are hidden because those metrics are switched off in
-    Setup → Tracked metrics. Tick them back on and they return, history included.
-  </p>`;
+  if (!on.pump) off.push('pumping');
+
+  // Named as the switches in Setup name them, so the sentence points at a row
+  // the reader can actually find.
+  const hidden = [];
+  if (on.feeds && !charts.intake) hidden.push('Milk in');
+  if (on.feeds && !charts.feeds) hidden.push('Feeds');
+  if (on.diapers && !charts.diapers) hidden.push('Diapers');
+  if (on.sleep && !charts.sleep) hidden.push('Sleep');
+  if (on.pump && !charts.pump) hidden.push('Pumped');
+  if (on.feeds && !charts.clock) hidden.push('When feeds happen');
+
+  return `
+    ${off.length ? `<p class="small muted" style="margin:0 4px 8px">
+      Charts for ${esc(list(off))} are hidden because those metrics are switched off in
+      Setup → Tracked metrics. Tick them back on and they return, history included.
+    </p>` : ''}
+    ${hidden.length ? `<p class="small muted" style="margin:0 4px 8px">
+      The ${esc(list(hidden))} chart${hidden.length === 1 ? ' is' : 's are'} switched off in
+      Setup → Statistics. Nothing stopped being recorded — only the drawing is gone.
+    </p>` : ''}`;
 }
 
 /* --------------------------------------------------------------- the charts */
@@ -558,6 +603,39 @@ function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
       in Setup → Nutrition.
     </p>
     ${cards}`;
+}
+
+/**
+ * What came out rather than what went in.
+ *
+ * Pumped milk is deliberately kept off the intake chart: the bottle it becomes
+ * is logged separately, and adding both would count the same milk twice.
+ */
+function pumpChart(rows, avg, width, hourly) {
+  const data = rows.map((r) => ({ ...r, value: r.values.pumpMl }));
+  const sessions = rows.reduce((a, r) => a + r.values.pumps, 0);
+  if (!sessions) return '';
+  const blank = sessions - rows.reduce((a, r) => a + (r.values.pumpMl > 0 ? r.values.pumps : 0), 0);
+
+  return chartCard({
+    id: 'viz-pump',
+    title: `Pumped per ${xLabel(hourly)}`,
+    subtitle: 'cc expressed, from the amount on each pump entry',
+    svg: columnChart({
+      rows: data, width, unit: 'cc', title: 'Pumped', avg: hourly ? null : avg.pumpMl,
+    }),
+    note: blank
+      ? 'Sessions logged without an amount leave no bar behind, so the real total is higher than this.'
+      : '',
+    table: tableTwin({
+      id: 'viz-pump',
+      rows: data,
+      columns: [
+        { label: 'cc', get: (r) => Math.round(r.values.pumpMl) },
+        { label: 'Sessions', get: (r) => r.values.pumps },
+      ],
+    }),
+  });
 }
 
 function clockChart(cfg, events, width) {

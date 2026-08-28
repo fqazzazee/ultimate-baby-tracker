@@ -3,6 +3,45 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.5.0 — 2026-08-28
+
+### Tracked metrics
+
+- **The Track screen's cards can be put in your own order.** Drag a row by its
+  ⠿ grip in **Setup → Tracked metrics** and the Track screen follows — the card
+  you reach for at 3 a.m. belongs at the top. It saves the moment you let go.
+  Arrow keys on a focused grip do the same thing, so the order is reachable
+  without a pointer; the drag itself is built on pointer events rather than
+  HTML5 drag-and-drop, which does not fire on touch at all.
+- **The overview tile now follows the tick boxes.** With sleep switched off it
+  was still showing a **Sleep** figure — the one place a metric nobody tracks
+  survived. Feeds, cc, wet, poop and sleep each appear only when their button
+  is tracked, and the "last feed · last change" line does the same.
+
+### Statistics
+
+- **A chart for pumped milk**, in cc per day (or per hour on the one-day range),
+  with the daily average drawn across it and a table twin like every other
+  chart. Pumping is deliberately kept away from intake: the bottle it becomes is
+  logged separately, and counting both would count the same milk twice. A
+  headline tile reports the daily figure beside the others.
+- **New: Setup → Statistics**, a switch per chart — milk in, feeds, diapers,
+  sleep, pumped and when-feeds-happen. This one only hides the drawing: the
+  headline tiles stay and nothing stops being recorded. A metric that is not
+  tracked at all has no chart to switch, so its row says what it is waiting for
+  instead of doing nothing. The line under the charts now names which switch
+  hid what.
+
+### Nutrition
+
+- **Each milk profile has its own on/off switch.** Untick the formulas you are
+  not using and they stop being offered on the Bottle card and in the default
+  picker — a shortlist of two beats scrolling past eight in the dark. Entries
+  that already name a switched-off profile keep their numbers and still show it
+  when opened, so putting away a finished tin rewrites no history. Switching off
+  the default moves the default to something a bottle can still be logged as,
+  and the last profile on offer cannot be switched off.
+
 ## 1.4.4 — 2026-08-27
 
 ### Documentation
