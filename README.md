@@ -6,10 +6,6 @@
 anything else you care to invent. Renders and works on modern web browsers from your notebook, 
 workstation and phone.
 
-
-https://github.com/user-attachments/assets/44830829-1585-4d54-80b2-a6cc547ed1d2
-
-
 No accounts, no cloud, no build step, no dependencies. Your entries stay on your
 machine as plain text you can read.
 
