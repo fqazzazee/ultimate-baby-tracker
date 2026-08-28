@@ -820,6 +820,28 @@ input:focus, select:focus, textarea:focus {
 }
 .list-item .grow { flex: 1; min-width: 0; }
 
+/* The reorder grip on Setup's tracked-metric rows. `touch-action: none` is what
+   lets a finger drag the row rather than scroll the page under it, and the row
+   is lifted with a shadow while it moves so it reads as picked up. */
+.reorder-row { gap: 10px; }
+.grip {
+  flex: none;
+  width: 22px; min-height: 36px;
+  display: grid; place-items: center;
+  padding: 0; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--muted);
+  font-size: 1.1rem; line-height: 1;
+  cursor: grab; touch-action: none;
+  -webkit-user-select: none; user-select: none;
+}
+.grip:hover { color: var(--text); }
+.grip:focus-visible { outline: none; box-shadow: var(--ring); }
+.reordering .grip { cursor: grabbing; }
+.reorder-row.dragging {
+  position: relative; z-index: 5;
+  box-shadow: var(--shadow-lg);
+}
+
 .offline-bar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 200;
   background: var(--danger); color: #fff;

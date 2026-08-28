@@ -1,6 +1,7 @@
 /** Shared rendering helpers: tones, event summaries, and the field renderer. */
 
 import { esc, fmtMinutes } from './util.js';
+import { milkEnabled, milkTypeIds } from './nutrition.js';
 
 export const TONES = ['pink', 'sky', 'mint', 'lemon', 'lavender', 'peach'];
 
@@ -36,6 +37,25 @@ export function activeTypes(config) {
   return (config.eventTypes || [])
     .filter((t) => !t.archived)
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+}
+
+/**
+ * Which metrics Setup is currently tracking.
+ *
+ * The Track hero, the Statistics tiles and the charts all read this, so a
+ * button switched off in Setup -> Tracked metrics disappears from every one of
+ * them at once rather than leaving an empty "Sleep --" tile behind.
+ */
+export function trackedMetrics(config) {
+  const active = new Set(activeTypes(config).map((t) => t.id));
+  const milk = [...milkTypeIds(config)].filter((id) => active.has(id));
+  return {
+    milk: new Set(milk),
+    feeds: milk.length > 0,
+    diapers: active.has('diaper'),
+    sleep: active.has('sleep'),
+    pump: active.has('pump'),
+  };
 }
 
 /** Look up a colour field option (poop colours carry an alert note). */
@@ -106,9 +126,14 @@ function optionName(o) {
  * `optionsFrom: 'milks'` follows whatever profiles exist in Setup -> Nutrition,
  * so adding a formula there adds it to the bottle picker with no migration.
  */
-export function resolveOptions(field, cfg) {
+export function resolveOptions(field, cfg, current = null) {
   if (field.optionsFrom === 'milks') {
-    return (cfg?.nutrition?.milks || []).map((m) => ({ name: m.name, emoji: m.emoji }));
+    // A profile switched off in Setup stops being offered, but an entry that
+    // already names it keeps its choice on screen - otherwise editing an old
+    // bottle would silently drop what was in it.
+    return (cfg?.nutrition?.milks || [])
+      .filter((m) => milkEnabled(m) || m.name === current || m.id === current)
+      .map((m) => ({ name: m.name, emoji: m.emoji }));
   }
   return field.options || [];
 }
@@ -131,7 +156,7 @@ export function fieldHTML(field, value, cfg = null) {
       </div>`;
 
     case 'select': {
-      const opts = resolveOptions(field, cfg);
+      const opts = resolveOptions(field, cfg, value ?? null);
       const cur = value ?? '';
       body = `<input type="hidden" data-field="${key}" data-kind="text" value="${esc(cur)}">
         <div class="preset-row" data-choices="${key}">

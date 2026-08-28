@@ -33,19 +33,26 @@ totals. Tap any entry to edit or delete it. Exports to CSV.
 
 **Alarms** — see below.
 
-**Setup** — babies, people, tracked metrics, nutrition, theme and sound, plus an
-**About** card at the bottom with the version, links back to this repository and
+**Setup** — babies, people, tracked metrics and their order, nutrition,
+statistics, theme and sound, plus an **About** card at the bottom with the version, links back to this repository and
 the docs, and a reminder of the security posture above.
 
 ## Tracked metrics
 
 Nobody needs every card. **Setup → Tracked metrics** is a list of tick boxes,
-one per button: untick **Sleep** and the sleep card leaves the Track screen and
-the History filters, and that is the end of it. Nothing already logged is
-deleted, nothing is hidden from the export or a backup, and ticking the box
-again brings the card back exactly as it was.
+one per button: untick **Sleep** and the sleep card leaves the Track screen, its
+tile leaves the overview at the top of it, its chart and headline figure leave
+Stats, and it drops out of the History filters. That is the end of it. Nothing
+already logged is deleted, nothing is hidden from the export or a backup, and
+ticking the box again brings all of it back exactly as it was.
 
 It works on the buttons you invent as well as the eight that ship with the app.
+
+**The order is yours too.** Drag a row by its ⠿ grip and the Track screen
+follows: the card you reach for at 3 a.m. belongs at the top, and whatever you
+log once a week can sit at the bottom. It saves the moment you let go. With the
+grip focused, ↑ and ↓ move the row one place, so the order is reachable without
+a pointer at all.
 
 ## Nutrition
 
@@ -75,6 +82,12 @@ Once it is on:
 
 - The **Bottle** card grows a *What is in it* picker listing your profiles.
   Breastfeeds count as breast milk without being asked.
+- **Each profile has its own switch.** Untick the ones you are not using and
+  they stop being offered on the Bottle card and in the default picker — a
+  shortlist of two beats scrolling past eight at 3 a.m. Entries that already
+  name a switched-off profile keep their numbers and still show it when you
+  open them, so putting a finished tin away rewrites nothing. One profile
+  always has to stay on.
 - A **Nutrition today** card appears on the Track screen with running totals.
 - **Setup → Nutrition → Show these nutrients** decides which of the nine —
   energy, protein, fat, carbs, iron, calcium, vitamin D, DHA and sodium — get a
@@ -104,6 +117,7 @@ have not happened yet are left off rather than drawn as zeros.
 | **Feeds** | How often, regardless of volume |
 | **Diapers** | Wet and dirty side by side — the everyday hydration check |
 | **Sleep** | Total from timed sleeps, plus the longest stretch |
+| **Pumped** | cc expressed per day — what came out, kept well away from intake so the bottle it becomes is never counted twice |
 | **Nutrients** | One chart per nutrient you chose to show, each with the reference intake for a baby that age drawn across it |
 | **When feeds happen** | The shape of the day, and whether nights are settling |
 
@@ -111,11 +125,14 @@ Above them sits a row of daily averages. Today is deliberately left out of those
 averages — a day that is still filling up drags the mean down and makes the
 number lie.
 
-**Charts follow Setup.** Untick *Sleep* in **Tracked metrics** and its chart and
-headline tile disappear along with its card on the Track screen; the same goes
-for diapers and for feeds. A line under the charts says which ones are hidden
-and why. Which nutrient charts appear follows **Setup → Nutrition → Show these
-nutrients**.
+**Charts follow Setup, two ways.** Untick *Sleep* in **Tracked metrics** and its
+chart and headline tile disappear along with its card on the Track screen; the
+same goes for diapers, feeds and pumping. And **Setup → Statistics** has a
+switch per chart for the screens that are simply longer than you want — that one
+hides the drawing and nothing else, so the headline tiles stay and every entry
+is still recorded. A line under the charts says which are hidden and which
+switch did it. Which nutrient charts appear follows **Setup → Nutrition → Show
+these nutrients**.
 
 Every chart carries three things: a **Table** button that unfolds the same values
 as text, a **⬇️ download** button that saves it as a PNG with its title, subtitle

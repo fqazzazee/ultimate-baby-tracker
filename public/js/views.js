@@ -7,7 +7,7 @@ import {
   esc, fmtTime, fmtDate, fmtAgo, fmtSpan, fmtClock, fmtMinutes, babyAge, dayKey, ringState,
 } from './util.js';
 import {
-  typeOf, userOf, toneStyle, activeTypes, summarize, alertFor,
+  typeOf, userOf, toneStyle, activeTypes, trackedMetrics, summarize, alertFor,
 } from './ui.js';
 import {
   nutritionOn, shownNutrients, totalNutrients, fmtNutrient,
@@ -57,13 +57,34 @@ function offlineBar() {
 
 /* ------------------------------------------------------------- track view */
 
+/**
+ * The overview tile. Every figure on it is one Setup is actually tracking:
+ * untick Sleep and the sleep tile goes with the card, rather than sitting
+ * there reading "-" forever.
+ */
 function heroCard() {
   const baby = currentBaby();
   if (!baby) return '';
+  const cfg = config();
+  const on = trackedMetrics(cfg);
   const s = todayStats();
-  const feedTypes = milkTypeIds(config());
+  const feedTypes = milkTypeIds(cfg);
   const lastFeed = eventsForBaby().find((e) => feedTypes.has(e.typeId));
   const lastDiaper = lastOfType('diaper');
+
+  const since = [
+    on.feeds ? `🍼 ${lastFeed ? esc(fmtAgo(lastFeed.at)) : 'no feed yet'}` : '',
+    on.diapers ? `🧷 ${lastDiaper ? esc(fmtAgo(lastDiaper.at)) : 'no change yet'}` : '',
+  ].filter(Boolean).join(' · ');
+
+  const tile = (value, label) => `<div class="stat"><div class="v">${value}</div><div class="k">${label}</div></div>`;
+  const tiles = [
+    on.feeds ? tile(s.feeds, 'Feeds') : '',
+    on.feeds ? tile(s.volume || '—', 'cc today') : '',
+    on.diapers ? tile(s.wet, 'Wet') : '',
+    on.diapers ? tile(s.poop, 'Poop') : '',
+    on.sleep ? tile(s.sleepMin ? esc(fmtMinutes(s.sleepMin)) : '—', 'Sleep') : '',
+  ].filter(Boolean).join('');
 
   return `
     <div class="card" style="${toneStyle(baby.tone)}">
@@ -72,19 +93,10 @@ function heroCard() {
         <div class="grow" style="flex:1">
           <h2>${esc(baby.name)}</h2>
           <div class="muted small">${esc(babyAge(baby.birthDate) || 'Add a birthday in Setup')}</div>
-          <div class="small" style="margin-top:4px">
-            🍼 ${lastFeed ? esc(fmtAgo(lastFeed.at)) : 'no feed yet'} ·
-            🧷 ${lastDiaper ? esc(fmtAgo(lastDiaper.at)) : 'no change yet'}
-          </div>
+          ${since ? `<div class="small" style="margin-top:4px">${since}</div>` : ''}
         </div>
       </div>
-      <div class="stat-grid">
-        <div class="stat"><div class="v">${s.feeds}</div><div class="k">Feeds</div></div>
-        <div class="stat"><div class="v">${s.volume || '—'}</div><div class="k">cc today</div></div>
-        <div class="stat"><div class="v">${s.wet}</div><div class="k">Wet</div></div>
-        <div class="stat"><div class="v">${s.poop}</div><div class="k">Poop</div></div>
-        <div class="stat"><div class="v">${s.sleepMin ? esc(fmtMinutes(s.sleepMin)) : '—'}</div><div class="k">Sleep</div></div>
-      </div>
+      ${tiles ? `<div class="stat-grid">${tiles}</div>` : ''}
     </div>`;
 }
 

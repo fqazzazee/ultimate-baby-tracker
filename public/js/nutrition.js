@@ -49,22 +49,39 @@ export function milkById(cfg, id) {
 }
 
 /**
+ * A profile switched off in Setup -> Nutrition. The flag only stops it being
+ * *offered*: entries logged against it keep their numbers, so switching a
+ * formula off when a tin runs out never rewrites history.
+ */
+export const milkEnabled = (milk) => milk?.enabled !== false;
+
+/** The profiles still on offer, in the order Setup lists them. */
+export function enabledMilks(cfg) {
+  return (cfg?.nutrition?.milks || []).filter(milkEnabled);
+}
+
+/**
  * Which milk an entry counts as. The picker stores the profile's name, so
  * match on that first; a breastfeed with no picker falls back to whatever
  * profile is marked as breast milk, and everything else to the chosen default.
  */
 export function milkFor(cfg, event) {
   const milks = cfg?.nutrition?.milks || [];
+  const live = enabledMilks(cfg);
   const picked = event?.data?.milk;
+  // An explicit choice wins even if that profile has since been switched off -
+  // it is what was actually in the bottle.
   if (picked) {
     const hit = milks.find((m) => m.name === picked || m.id === picked);
     if (hit) return hit;
   }
   if (event?.typeId === 'breast') {
-    const bm = milks.find((m) => m.kind === 'breastmilk');
+    const bm = live.find((m) => m.kind === 'breastmilk') || milks.find((m) => m.kind === 'breastmilk');
     if (bm) return bm;
   }
-  return milkById(cfg, cfg?.nutrition?.defaultMilkId) || milks[0] || null;
+  const fallback = milkById(cfg, cfg?.nutrition?.defaultMilkId);
+  if (fallback && milkEnabled(fallback)) return fallback;
+  return live[0] || fallback || milks[0] || null;
 }
 
 /** Nutrients in one entry, or null when there is no volume to scale by. */

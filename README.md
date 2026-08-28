@@ -85,9 +85,9 @@ every update, so updating cannot touch them.
 | --- | --- |
 | **Track** | One tap per event. Breastfeeds and sleeps are timers. A toast offers Undo for a few seconds after every tap. |
 | **History** | Everything logged, grouped by day, filterable, editable. Exports to CSV. |
-| **Stats** | Intake, feeds, diapers, sleep and nutrients over 1–90 days, with the figures a check-up asks for. Each chart downloads as an image. |
+| **Stats** | Intake, feeds, diapers, sleep, pumping and nutrients over 1–90 days, with the figures a check-up asks for. Pick which charts you want. Each one downloads as an image. |
 | **Alarms** | "Tell me if she hasn't fed in three hours." Rings on time, even in a background tab. |
-| **Setup** | Babies, people, which metrics to track, milk profiles, custom buttons, backup and restore. |
+| **Setup** | Babies, people, which metrics to track and in what order, which milks to offer, which charts to draw, custom buttons, backup and restore. |
 
 Also: multiple babies and multiple carers (every entry records who did it),
 optional 4-digit profile PINs, nutrition worked out from the cc you already log,

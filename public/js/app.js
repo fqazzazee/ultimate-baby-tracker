@@ -361,6 +361,28 @@ const ACTIONS = {
       if (t) t.archived = !tracked;
     });
   },
+  /**
+   * Whether a profile is still offered. Switching one off leaves every entry
+   * that named it alone; it only stops appearing on the Bottle card.
+   */
+  'toggle-milk': (el) => {
+    const on = el.checked;
+    const milks = config().nutrition?.milks || [];
+    if (!on && milks.filter((m) => m.enabled !== false).length <= 1) {
+      el.checked = true;
+      return toast({ icon: '🍼', text: 'Keep at least one milk on offer', tone: 'peach' });
+    }
+    sound.play(on ? 'pop' : 'undo');
+    return saveConfig((cfg) => {
+      const milk = cfg.nutrition.milks.find((m) => m.id === el.dataset.id);
+      if (!milk) return;
+      milk.enabled = on;
+      // The fallback has to be something a bottle can actually be logged as.
+      if (!on && cfg.nutrition.defaultMilkId === milk.id) {
+        cfg.nutrition.defaultMilkId = cfg.nutrition.milks.find((m) => m.enabled !== false)?.id || null;
+      }
+    });
+  },
   'add-milk': () => openMilkSheet(),
   'edit-milk': (el) => openMilkSheet(el.dataset.id),
   'set-default-milk': (el) => saveConfig((cfg) => { cfg.nutrition.defaultMilkId = el.dataset.id; }),
