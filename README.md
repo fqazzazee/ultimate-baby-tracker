@@ -108,12 +108,12 @@ alarms.json    snooze / last-fired state
 
 ## Read more
 
-- **[Manual](docs/manual.md)** — every screen, nutrition, statistics, custom
-  buttons, backup and restore, the HTTP API
+- **[Manual](docs/manual.md)** — how to use manual that includes setting up the screen,
+  nutrition, statistics, custom, buttons, backup and restore, the HTTP API
 - **[Installing](docs/install.md)** — every installer flag, the service on each
   platform, what an update does
 - **[Security](SECURITY.md)** — **read this before exposing it to anything**
-- **[Changelog](CHANGELOG.md)**
+- **[Changelog](CHANGELOG.md)** — **version changes**
 
 > **No authentication and no encryption.** It was never designed to have any.
 > Keep it on a trusted network — see [SECURITY.md](SECURITY.md).
