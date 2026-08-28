@@ -2,8 +2,7 @@
 
 [![Ultimate Baby Tracker: one tap at 3am, answers at the check-up — the Track screen on a laptop and a phone, a month of daily intake in Stats, and editable formula profiles in Setup](docs/slide/slide.png)](https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/)
 
-<sub>That slide is a live page, not a picture — [open it](https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/), or edit
-[`docs/slide/index.html`](docs/slide/index.html) and redraw it.</sub>
+<sub>That slide is a live page, view it here -> (https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/)
 
 Self-hosted, offline, one-tap tracking for a newborn: feeds, diapers, sleep, baths, medicine, and
 anything else you care to invent. Renders and works on modern web browsers from your notebook, 
