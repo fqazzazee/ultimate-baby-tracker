@@ -2,10 +2,6 @@
 
 [![Ultimate Baby Tracker: one tap at 3am, answers at the check-up — the Track screen on a laptop and a phone, a month of daily intake in Stats, and editable formula profiles in Setup](docs/slide/slide.png)](https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/)
 
-## Preview - Phone
-https://github.com/user-attachments/assets/3ed05941-5b41-4e2f-b085-fe685801320b
-
-
 
 One-tap tracking for a newborn: feeds, diapers, sleep, baths, medicine, and
 anything else you care to invent. Renders and works on modern web browsers from your notebook, 
