@@ -10,6 +10,12 @@ workstation and phone.
 **Self-hosted**, **offline**, No accounts, no cloud, no build step, no dependencies. Your entries stay on your
 machine as plain text you can read.
 
+## Preview - Mobile Phone View
+
+https://github.com/user-attachments/assets/19796da7-176f-440a-afb3-2f360b609352
+
+
+
 ## Install
 
 Node 18 or newer is the only prerequisite.
