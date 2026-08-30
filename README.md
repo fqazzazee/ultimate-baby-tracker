@@ -119,4 +119,6 @@ alarms.json    snooze / last-fired state
 > **No authentication and no encryption.** It was never designed to have any.
 > Keep it on a trusted network — see [SECURITY.md](SECURITY.md).
 
-MIT licensed. Made with 🍼 and very little sleep.
+Licensed under the [PolyForm Strict License 1.0.0](LICENSE) — free for any noncommercial
+use; it does not permit redistribution or modified versions. Made with 🍼 and very
+little sleep.
