@@ -259,40 +259,6 @@
   }
   .phone img { object-position: top center; }
 
-  /* The one loud thing on the slide: a price sticker, because the price is
-     the pitch. */
-  .sticker {
-    position: absolute;
-    top: calc(-16 * var(--u));
-    right: calc(-14 * var(--u));
-    z-index: 3;
-    transform: rotate(-7deg);
-    background: var(--mint);
-    color: #10261f;
-    border-radius: 50%;
-    width: calc(112 * var(--u));
-    height: calc(112 * var(--u));
-    display: grid;
-    place-content: center;
-    text-align: center;
-    box-shadow: 0 calc(10 * var(--u)) calc(24 * var(--u)) rgba(6, 3, 14, 0.5);
-  }
-  .sticker b {
-    display: block;
-    font-family: var(--display);
-    font-size: calc(31 * var(--u));
-    line-height: 1;
-    letter-spacing: calc(-0.6 * var(--u));
-  }
-  .sticker i {
-    display: block;
-    font-family: var(--mono);
-    font-style: normal;
-    font-size: calc(9 * var(--u));
-    letter-spacing: calc(1.2 * var(--u));
-    margin-top: calc(4 * var(--u));
-  }
-
   /* ---------- entrance ---------- */
 
   @media (prefers-reduced-motion: no-preference) {
@@ -301,22 +267,16 @@
     .d2 { animation-delay: 150ms; }
     .d3 { animation-delay: 240ms; }
     .d4 { animation-delay: 330ms; }
-    .sticker { animation: stamp 520ms cubic-bezier(0.2, 1.3, 0.4, 1) 620ms backwards; }
   }
   @keyframes rise {
     from { opacity: 0; transform: translateY(calc(14 * var(--u))); }
     to { opacity: 1; transform: none; }
   }
-  @keyframes stamp {
-    from { opacity: 0; transform: rotate(-7deg) scale(1.35); }
-    to { opacity: 1; transform: rotate(-7deg) scale(1); }
-  }
-
   @media print {
     @page { size: landscape; margin: 0; }
     :root { --u: calc(100vw / 1600); }
     body { min-height: auto; }
-    .anim, .sticker { animation: none; }
+    .anim { animation: none; }
   }
 </style>
 
@@ -357,7 +317,7 @@
     <div class="close">
       <div class="price anim d4">
         <span class="free">Free</span>
-        <p><b>No accounts. No cloud. No subscription.</b><br>Source-available under the PolyForm Strict License, free for noncommercial use — your entries stay on your machine as plain text you can read.</p>
+        <p><b>Self-hosting is free — no accounts, no cloud, no subscription.</b><br>Source-available under the PolyForm Strict License, free for noncommercial use — your entries stay on your machine as plain text you can read.</p>
       </div>
       <div class="install anim d4"><span>$</span> ./scripts/install.sh install</div>
       <p class="fine anim d4"><b>github.com/fqazzazee/ultimate-baby-tracker</b><br>LINUX · MACOS · WINDOWS — SERVICE INSTALL, NO ADMIN RIGHTS</p>
@@ -365,8 +325,6 @@
   </div>
 
   <div class="shots">
-    <div class="sticker"><b>$0</b><i>FOREVER</i></div>
-
     <figure class="frame hero anim d2">
       <img src="assets/track.webp" alt="The Track screen: tap-to-log buttons for breastfeed, bottle, diaper and sleep on the left, the baby's day and nutrition totals in the middle, and the most recent entries on the right.">
     </figure>
