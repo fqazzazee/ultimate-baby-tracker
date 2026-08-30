@@ -14,7 +14,42 @@ machine as plain text you can read.
 
 https://github.com/user-attachments/assets/19796da7-176f-440a-afb3-2f360b609352
 
+## Compatibility
 
+Two separate questions: which machine **runs** it, and which device you **use**
+it from.
+
+**Running it.** One machine on your network holds the data and serves the app.
+
+| | Install | In the background |
+| --- | --- | --- |
+| **Linux** | `./scripts/install.sh install` | systemd **user** service — no root, survives a logout, starts at boot |
+| **macOS** | `./scripts/install.sh install` | no service; the install works and then prints the command to start it yourself |
+| **Windows** | `.\scripts\install.cmd install` | scheduled task under your own account — starts when you log in, no administrator rights |
+| **Anything else with Node 18+** | `node server.js` | by hand, or write your own unit — see [SECURITY.md](SECURITY.md#putting-it-behind-a-proxy) |
+| **iOS · Android** | — | not supported — a phone is a client here, never the host |
+
+**Using it.** A browser, over the network.
+
+| | Browser | Installable app |
+| --- | --- | --- |
+| **Desktop · laptop** | any modern browser | Chrome and Edge can install the page as an app |
+| **Android** | Chrome — the layout is built for the phone | **not yet** |
+| **iPhone · iPad** | Safari — the layout is built for the phone | **not yet** |
+
+**There is no Android or iOS app yet.** Phones are supported as browser
+clients and nothing more for now — open the address, and the screen you get is
+the one in the preview above.
+
+A phone only has to reach the server, and on the same Wi-Fi it already does.
+Away from home, put both ends on a VPN — WireGuard or Tailscale — or behind a
+reverse proxy that adds authentication, and the phone reaches it from anywhere.
+**Do not simply forward a port to it:** it has no authentication and no
+encryption of its own, so anyone who finds the address is already inside. See
+[SECURITY.md](SECURITY.md).
+
+Nothing is cached for offline use either — the server has to be reachable when
+you open it.
 
 ## Install
 
@@ -71,8 +106,8 @@ node server.js     # → http://localhost:8477
 
 ## Then
 
-The installer prints the address when it is done. Open it on your phone and add
-it to the home screen — it behaves like an app from there.
+The installer prints the address when it is done. Open it in a browser on any
+device that can reach the machine, phones included.
 
 Same three commands on either platform — `install.sh` on Linux and macOS,
 `install.cmd` on Windows:
