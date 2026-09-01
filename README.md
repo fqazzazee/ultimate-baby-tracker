@@ -14,6 +14,17 @@ machine as plain text you can read.
 
 https://github.com/user-attachments/assets/19796da7-176f-440a-afb3-2f360b609352
 
+### Or try it yourself, having installed nothing
+
+**[ultimate-baby-tracker.safeqbit.com](https://ultimate-baby-tracker.safeqbit.com)**
+runs the whole application in your browser, on six weeks of invented data for
+two newborns and a toddler. Not a video and not screenshots — every screen is
+live. Log a feed and watch it reach the charts, read the statistics, export the
+CSV and open it in a spreadsheet.
+
+It keeps what you tap in that one browser tab and nowhere else. No account, no
+server, nothing shared with anybody, and closing the tab forgets all of it.
+
 ## Compatibility
 
 Two separate questions: which machine **runs** it, and which device you **use**
@@ -157,6 +168,8 @@ alarms.json    snooze / last-fired state
   platform, what an update does
 - **[Security](SECURITY.md)** — **read this before exposing it to anything**
 - **[Changelog](CHANGELOG.md)** — **version changes**
+- **[Website and live demo](https://ultimate-baby-tracker.safeqbit.com)** — the
+  app running in a browser, and the manual and FAQ as searchable pages
 
 > **No authentication and no encryption.** It was never designed to have any.
 > Keep it on a trusted network — see [SECURITY.md](SECURITY.md).
