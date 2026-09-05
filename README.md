@@ -139,11 +139,11 @@ every update, so updating cannot touch them.
 
 | | |
 | --- | --- |
-| **Track** | One tap per event. Breastfeeds and sleeps are timers. A toast offers Undo for a few seconds after every tap. |
+| **Track** | One tap per event. Breastfeeds and sleeps are timers, and a breastfeed times each side separately — switch with one tap, and the card tells you which breast to start on next. A toast offers Undo for a few seconds after every tap. |
 | **History** | Everything logged, grouped by day, filterable, editable. Exports to CSV. |
-| **Stats** | Intake, feeds, diapers, sleep, pumping and nutrients over 1–90 days, with the figures a check-up asks for. Pick which charts you want. Each one downloads as an image. |
+| **Stats** | Intake, feeds, diapers, sleep, pumping, nursing by side and nutrients over 1–90 days, with the figures a check-up asks for. Buttons you invent are charted too, from the fields you gave them. Pick which charts you want; each downloads as an image. |
 | **Alarms** | "Tell me if she hasn't fed in three hours." Rings on time, even in a background tab. |
-| **Setup** | Babies, people, which metrics to track and in what order, which milks to offer, which charts to draw, custom buttons, backup and restore. |
+| **Setup** | Babies, people, which metrics to track and in what order, which milks to offer, which charts to draw, custom buttons, backup and restore, and backups on a schedule. |
 
 Also: multiple babies and multiple carers (every entry records who did it),
 optional 4-digit profile PINs, nutrition worked out from the cc you already log
@@ -159,9 +159,17 @@ config.json    babies, people, buttons, alarms, milk profiles, settings
 events.log     one JSON object per line, append-only
 timers.json    timers currently running
 alarms.json    snooze / last-fired state
+backups/       automatic backups, once you switch them on
 ```
 
 **Setup → Data** downloads the lot as one compressed file and restores it again.
+
+**Setup → Automatic backup** does it on a schedule instead, daily or weekly,
+keeping the newest few and pruning the rest. It runs on the server, so it needs
+nobody's browser open and no cron entry of your own. Copies land in `backups/`
+above — or set `BT_BACKUP_DIR` to a NAS mount or a synced folder and they leave
+the machine on their own, which is the part that makes a copy a backup rather
+than a second copy of a disk that can fail once.
 
 ## Read more
 
