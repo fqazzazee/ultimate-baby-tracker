@@ -15,7 +15,9 @@ import {
   NUTRIENTS, MILK_KINDS, nutritionOn, milkById, milkEnabled, enabledMilks, milkSummary,
 } from './nutrition.js';
 import { supportsSides } from './feeding.js';
-import { customChartTypes, customChartOn, AGGREGATIONS } from './stats.js';
+import {
+  customChartTypes, customChartOn, chartableMetrics, chartGroups, combineCharts, AGGREGATIONS,
+} from './stats.js';
 
 /* ------------------------------------------------------------ tiny pickers */
 
@@ -1159,6 +1161,33 @@ function statsCard(cfg) {
  * ticked; the ones that ship with the app arrive unticked, so nobody who never
  * came to this screen finds it has grown three charts of bath times.
  */
+/**
+ * The metrics of this button that could share a chart with another - same unit,
+ * same aggregation. Empty means there is nothing to offer and the switch is not
+ * drawn, rather than drawn and doing nothing.
+ */
+function combinable(cfg, type) {
+  const on = chartableMetrics(type).filter((m) => customChartOn(cfg, type, m.key));
+  const seen = new Map();
+  for (const m of on) {
+    const key = `${m.agg}|${m.unit || ''}`;
+    seen.set(key, (seen.get(key) || 0) + 1);
+  }
+  return [...seen.entries()].filter(([, n]) => n > 1).map(([key]) => key);
+}
+
+/** Say what will happen, in this button's own terms, rather than in general. */
+function combineHint(cfg, type) {
+  const groups = chartGroups(cfg, type, chartableMetrics(type));
+  if (combineCharts(cfg, type)) {
+    const pairs = groups.filter((g) => g.length > 1);
+    return pairs.length
+      ? `${pairs.map((g) => g.map((m) => m.label).join(' + ')).join(', ')} share a chart`
+      : 'On, but nothing here shares a unit yet';
+  }
+  return 'One chart each. Only measures in the same unit, summarised the same way, can share one';
+}
+
 function customChartsCard(cfg) {
   const groups = customChartTypes(cfg);
   if (!groups.length) return '';
@@ -1186,6 +1215,12 @@ function customChartsCard(cfg) {
           `stats.buttons.${type.id}.${m.key}`,
           customChartOn(cfg, type, m.key),
         )).join('')}
+        ${combinable(cfg, type).length ? switchRow(
+          'Put them on one chart',
+          combineHint(cfg, type),
+          `stats.combine.${type.id}`,
+          combineCharts(cfg, type),
+        ) : ''}
         ${(type.fields || []).some((f) => f.type === 'select' || f.type === 'color') ? `
           <p class="small muted" style="margin:2px 0 10px">
             Its choice and colour fields are not in this list. Charting one means

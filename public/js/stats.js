@@ -892,73 +892,204 @@ function sidesChart(rows, avg, width, hourly) {
 }
 
 /**
- * One chart per metric a button of your own declares.
+ * Whether a button's metrics share one chart instead of getting one each.
  *
- * Built from the button's own fields, so a "Tummy time" button with a duration
+ * Off by default: combining is only ever right for measures that belong on the
+ * same axis, and the app cannot know that a "Left" and a "Right" you invented
+ * are two halves of one thing rather than two unrelated numbers. You know, so
+ * you say - Setup -> Charts from your own buttons.
+ */
+export function combineCharts(cfg, type) {
+  return cfg?.stats?.combine?.[type.id] === true;
+}
+
+/**
+ * What may share an axis, and in what order.
+ *
+ * Two metrics can share a chart only when they agree about *both* things a y-axis
+ * asserts: the unit the numbers are in, and how a day of them was reduced to one
+ * number. Millilitres beside minutes is the "one y-axis, never two" rule broken;
+ * a daily total beside a daily latest is subtler and worse, because the axis
+ * looks fine and the columns mean different things.
+ *
+ * Groups are then cut into pairs, because the chart palette has two slots. They
+ * are stepped separately for light and dark and checked for colour-vision
+ * deficiency, and a third colour invented here would be neither. Three
+ * compatible metrics therefore give one paired chart and one single, rather than
+ * one crowded chart in colours nobody has checked.
+ */
+export function chartGroups(cfg, type, metrics) {
+  const on = metrics.filter((m) => customChartOn(cfg, type, m.key));
+  if (!combineCharts(cfg, type)) return on.map((m) => [m]);
+
+  const buckets = new Map();
+  for (const m of on) {
+    const key = `${m.agg}|${m.unit || ''}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(m);
+  }
+  const out = [];
+  for (const bucket of buckets.values()) {
+    for (let i = 0; i < bucket.length; i += 2) out.push(bucket.slice(i, i + 2));
+  }
+  return out;
+}
+
+/** Minutes are stored, hours read better once a day's worth piles up. */
+function asHoursScale(metrics, peak) {
+  return metrics.every((m) => m.kind === 'duration' && m.agg !== 'count') && peak >= 120;
+}
+
+/** The sentence under the title, saying which summary these columns are. */
+function summaryLine(type, m, hourly) {
+  if (m.kind === 'count') return `Every ${type.label.toLowerCase()} logged`;
+  if (m.kind === 'toggle') return `How often "${m.label}" was ticked`;
+  return {
+    sum: `Added up over the ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
+    avg: `Average of the ${xLabel(hourly)}'s entries${m.unit ? ` · ${m.unit}` : ''}`,
+    last: `The last one recorded each ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
+  }[m.agg];
+}
+
+/**
+ * What to call a metric on screen. The count metric is called "How many" in the
+ * settings list, where it sits under the button's own heading - on a chart it
+ * has to carry the button's name itself, or a pair reads "How many and Rained".
+ */
+const labelOf = (type, m) => (m.kind === 'count' ? type.label : m.label);
+
+const cardId = (type, metrics) =>
+  `viz-c-${type.id}-${metrics.map((m) => m.key).join('-')}`.replace(/[^a-zA-Z0-9-]/g, '-');
+
+/** One metric, one chart. The shape this screen had before combining existed. */
+function singleCard(cfg, type, m, rows, avg, width, hourly) {
+  const id = `${type.id}.${m.key}`;
+  const data = rows.map((r) => ({ ...r, value: metricValue(m, r.custom[id]) }));
+  if (!data.some((r) => r.value > 0)) return '';
+
+  const mean = avg.custom[id] || 0;
+  const duration = m.kind === 'duration' && m.agg !== 'count';
+  const asHours = asHoursScale([m], Math.max(...data.map((r) => r.value)));
+  const scaled = asHours ? data.map((r) => ({ ...r, value: r.value / 60 })) : data;
+  const unit = asHours ? 'h' : (m.kind === 'count' || m.kind === 'toggle' ? '' : m.unit);
+  const vizId = cardId(type, [m]);
+
+  return chartCard({
+    id: vizId,
+    title: `${type.emoji} ${m.kind === 'count' ? type.label : m.label} per ${xLabel(hourly)}`,
+    subtitle: summaryLine(type, m, hourly),
+    svg: columnChart({
+      rows: scaled,
+      width,
+      unit,
+      title: m.label,
+      decimals: asHours ? 1 : 0,
+      avg: hourly ? null : (asHours ? mean / 60 : mean),
+      avgDecimals: 1,
+    }),
+    table: tableTwin({
+      id: vizId,
+      rows: data,
+      columns: [{
+        label: duration ? 'Time' : (m.unit || 'Count'),
+        get: (r) => (duration
+          ? (r.value ? fmtMinutes(Math.round(r.value)) : '—')
+          : Math.round(r.value * 100) / 100),
+      }],
+    }),
+  });
+}
+
+/**
+ * Two metrics on one chart, side by side.
+ *
+ * Grouped rather than stacked, which is the same choice the diaper and nursing
+ * charts made. Stacking asserts that the two add up to something - fine for
+ * left and right minutes at the breast, wrong for a high and a low temperature,
+ * and this code cannot tell which pair it has been handed. Side by side asserts
+ * only that they are comparable, which is exactly what sharing a unit and an
+ * aggregation guarantees.
+ *
+ * No average line: it belongs to one series, and drawn across two it would
+ * silently pick one and look like it described both.
+ */
+function pairCard(cfg, type, pair, rows, avg, width, hourly) {
+  const ids = pair.map((m) => `${type.id}.${m.key}`);
+  const values = (r) => Object.fromEntries(
+    pair.map((m, k) => [m.key, metricValue(m, r.custom[ids[k]])]),
+  );
+  const raw = rows.map((r) => ({ ...r, values: values(r) }));
+  if (!raw.some((r) => pair.some((m) => r.values[m.key] > 0))) return '';
+
+  const peak = Math.max(...raw.flatMap((r) => pair.map((m) => r.values[m.key])));
+  const asHours = asHoursScale(pair, peak);
+  const data = asHours
+    ? raw.map((r) => ({
+      ...r,
+      values: Object.fromEntries(pair.map((m) => [m.key, r.values[m.key] / 60])),
+    }))
+    : raw;
+
+  const duration = pair.every((m) => m.kind === 'duration' && m.agg !== 'count');
+  const unit = asHours ? 'h' : (pair[0].kind === 'count' || pair[0].kind === 'toggle' ? '' : pair[0].unit);
+  const series = pair.map((m, k) => ({ key: m.key, label: labelOf(type, m), slot: `s${k + 1}` }));
+  const vizId = cardId(type, pair);
+
+  // Both halves share an aggregation by construction, so one sentence covers
+  // the pair - and it is the pair's sentence, not the first one's.
+  const how = pair[0].agg === 'count'
+    ? 'Counted per'
+    : { sum: 'Added up over the', avg: "Average of the", last: 'The last one recorded each' }[pair[0].agg];
+  const tail = pair[0].agg === 'count'
+    ? `${xLabel(hourly)}`
+    : `${xLabel(hourly)}${pair[0].unit ? ` · ${pair[0].unit}` : ''}`;
+
+  return chartCard({
+    id: vizId,
+    title: `${type.emoji} ${pair.map((m) => labelOf(type, m)).join(' and ')} per ${xLabel(hourly)}`,
+    subtitle: `${how} ${tail}`,
+    legendHTML: legend(series),
+    svg: groupedColumnChart({
+      rows: data,
+      series,
+      width,
+      unit,
+      title: pair.map((m) => labelOf(type, m)).join(' and '),
+      decimals: asHours ? 1 : 0,
+    }),
+    table: tableTwin({
+      id: vizId,
+      rows: raw,
+      columns: pair.map((m) => ({
+        label: `${labelOf(type, m)}${m.unit && !duration ? ` (${m.unit})` : ''}`,
+        get: (r) => (duration
+          ? (r.values[m.key] ? fmtMinutes(Math.round(r.values[m.key])) : '—')
+          : Math.round(r.values[m.key] * 100) / 100),
+      })),
+    }),
+  });
+}
+
+/**
+ * The charts for buttons of your own.
+ *
+ * Built from each button's own fields, so a "Tummy time" button with a duration
  * on it gets minutes a day and a "Weight" button with a number gets its own
  * column chart, with no chart code written for either. A metric with nothing in
  * the range draws nothing rather than a row of zeros.
  */
 function customCharts(cfg, rows, avg, width, hourly) {
-  const cards = customChartTypes(cfg).flatMap(({ type, metrics }) => metrics
-    .filter((m) => customChartOn(cfg, type, m.key))
-    .map((m) => {
-      const id = `${type.id}.${m.key}`;
-      const data = rows.map((r) => ({ ...r, value: metricValue(m, r.custom[id]) }));
-      if (!data.some((r) => r.value > 0)) return '';
-
-      const mean = avg.custom[id] || 0;
-      const duration = m.kind === 'duration' && m.agg !== 'count';
-      // Minutes are the stored unit but hours are the readable one once a day's
-      // worth piles up; the table twin keeps the exact figure either way.
-      const asHours = duration && Math.max(...data.map((r) => r.value)) >= 120;
-      const scaled = asHours ? data.map((r) => ({ ...r, value: r.value / 60 })) : data;
-      const unit = asHours ? 'h' : (m.kind === 'count' || m.kind === 'toggle' ? '' : m.unit);
-      const decimals = asHours ? 1 : 0;
-
-      // Say which of the three summaries this is, so a column is never
-      // mistaken for a total it is not.
-      const what = m.kind === 'count'
-        ? `Every ${type.label.toLowerCase()} logged`
-        : m.kind === 'toggle'
-          ? `How often "${m.label}" was ticked`
-          : {
-            sum: `Added up over the ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
-            avg: `Average of the ${xLabel(hourly)}'s entries${m.unit ? ` · ${m.unit}` : ''}`,
-            last: `The last one recorded each ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
-          }[m.agg];
-
-      return chartCard({
-        id: `viz-c-${id.replace(/[^a-zA-Z0-9]/g, '-')}`,
-        title: `${type.emoji} ${m.kind === 'count' ? type.label : m.label} per ${xLabel(hourly)}`,
-        subtitle: what,
-        svg: columnChart({
-          rows: scaled,
-          width,
-          unit,
-          title: m.label,
-          decimals,
-          avg: hourly ? null : (asHours ? mean / 60 : mean),
-          avgDecimals: 1,
-        }),
-        table: tableTwin({
-          id: `viz-c-${id.replace(/[^a-zA-Z0-9]/g, '-')}`,
-          rows: data,
-          columns: [{
-            label: duration ? 'Time' : (m.unit || 'Count'),
-            get: (r) => (duration
-              ? (r.value ? fmtMinutes(Math.round(r.value)) : '—')
-              : Math.round(r.value * 100) / 100),
-          }],
-        }),
-      });
-    })).filter(Boolean).join('');
+  const cards = customChartTypes(cfg).flatMap(({ type, metrics }) =>
+    chartGroups(cfg, type, metrics).map((group) => (group.length > 1
+      ? pairCard(cfg, type, group, rows, avg, width, hourly)
+      : singleCard(cfg, type, group[0], rows, avg, width, hourly))))
+    .filter(Boolean).join('');
 
   if (!cards) return '';
   return `<div class="section-title">Your own buttons</div>
     <p class="small muted" style="margin:-4px 4px 10px">
-      Drawn from the fields each button records. Choose which of them appear in
-      Setup → Statistics.
+      Drawn from the fields each button records. Choose which of them appear —
+      and whether they share a chart — in Setup → Statistics.
     </p>
     ${cards}`;
 }

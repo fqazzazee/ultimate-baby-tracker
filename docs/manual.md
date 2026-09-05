@@ -178,6 +178,17 @@ your own buttons** has a switch for each. A button you invented arrives switched
 on; one that ships with the app arrives off, so the screen does not quietly grow
 three charts of bath times.
 
+**Two metrics can share a chart.** Switch on *Put them on one chart* under a
+button and its metrics pair up side by side rather than taking a card each —
+"In the pram" beside "Carried" answers a question two separate charts only hint
+at. Pairing is allowed only where both the unit and the summary agree:
+millilitres beside minutes is the one-y-axis rule broken, and a daily total
+beside a daily latest is subtler and worse, because the axis looks fine while
+the columns mean different things. Pairs are two at a time, because the chart
+palette has two slots; a third compatible metric keeps its own chart rather than
+being drawn in a colour nobody has checked. The switch names the pairs it will
+make before you turn it on.
+
 A number that is *measured* rather than accumulated needs to say so. In the field
 editor, **On a chart, a day of these is** offers **Total**, **Average** and
 **Latest** — pick Latest for a weight or a temperature. Left on Total, a week of
