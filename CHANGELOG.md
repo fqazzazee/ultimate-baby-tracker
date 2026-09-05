@@ -3,6 +3,30 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.9.0 — 2026-09-05
+
+### Charts from your own buttons
+
+- **Two metrics can now share one chart.** *Put them on one chart*, under each
+  button in **Setup → Charts from your own buttons**, pairs them side by side
+  instead of giving each a card of its own — "In the pram" beside "Carried"
+  answers a question that two separate charts only hint at.
+- **Only where it is honest.** A pair has to agree about both things a y-axis
+  asserts: the unit, and how a day of the numbers was reduced to one. Minutes
+  beside millilitres is the "one y-axis, never two" rule broken; a daily total
+  beside a daily latest is subtler and worse, because the axis looks right while
+  the columns mean different things.
+- **Two at a time.** The chart palette has two slots, stepped separately for
+  light and dark and checked for colour-vision deficiency. A third compatible
+  metric keeps a chart of its own rather than being drawn in a colour nobody has
+  validated.
+- Grouped rather than stacked, which is what the diaper and nursing charts
+  already do. Stacking would assert that the two add up to something — true for
+  left and right minutes, false for a high and a low temperature, and nothing
+  here can tell which pair it has been handed.
+- The switch says which of your metrics will pair *before* you turn it on, and
+  is not offered at all on a button where nothing can.
+
 ## 1.8.0 — 2026-09-04
 
 > Numbered 1.8.0 rather than 1.7.0 so that this and the Android package, which
