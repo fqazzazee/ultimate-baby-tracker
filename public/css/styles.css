@@ -951,6 +951,14 @@ input:focus, select:focus, textarea:focus {
 
 .viz-mark { transition: opacity 0.12s ease; }
 .viz-mark.s1 { fill: var(--viz-1); }
+/* The line chart's marks: a stroked path and its readings. Same two palette
+   slots as the columns, so a measured chart sits beside a counted one without
+   introducing a colour. */
+.viz-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-line.s1 { stroke: var(--viz-1); }
+.viz-line.s2 { stroke: var(--viz-2); }
+.viz-dot-mark.s1 { fill: var(--viz-1); }
+.viz-dot-mark.s2 { fill: var(--viz-2); }
 .viz-mark.s2 { fill: var(--viz-2); }
 .viz-hit { fill: transparent; }
 .viz-band { outline: none; }

@@ -50,6 +50,36 @@ totals. Tap any entry to edit or delete it. Exports to CSV.
 statistics, automatic backups, theme and sound, plus an **About** card at the bottom with the version, links back to this repository and
 the docs, and a reminder of the security posture above.
 
+## Growth, medicines and vitamins
+
+**Growth** records weight, length and head circumference — the three a check-up
+takes. The card opens the form rather than logging on one tap, because a
+measurement is numbers you have to type.
+
+Each charts as a **curve**: a line with a dot per reading, on an axis that frames
+the range instead of starting at zero, and gaps rather than zeros on the days
+nobody measured anything. Bars have to start at zero, since their length is the
+comparison being made; a newborn going 3.4 to 5.3 kg drawn that way is a flat
+line near the top of the plot. Weight and length are on from the start, head
+circumference is off — a figure a doctor watches rather than one for a home
+screen — and **Setup → Charts from your own buttons** switches it on.
+
+Fields are in kilograms and centimetres, matching the growth references everyone
+compares against. Both are editable; for pounds and ounces, open the Weight
+field, set the unit to `lb` and give it a smaller unit of 16 ounces.
+
+**Medicine** offers the ones a baby is commonly given at home — vitamin D, iron,
+a multivitamin, a probiotic, paracetamol, ibuprofen, simethicone, saline drops,
+teething gel, an antibiotic. **Other…** takes anything not on the list. Vitamin D
+gets a chart from the start, one column per day it was given, so a run of missed
+days is a gap you can see; any other item can have the same from Setup.
+
+> **The list is names, not advice.** There is not a dose, an age or a frequency
+> anywhere in it, and there will not be. What to give, how much and from what age
+> comes from the label and your pediatrician; an app that pre-filled a number
+> would be making that decision for them. Listing something is not a
+> recommendation to give it.
+
 ## Tracked metrics
 
 Nobody needs every card. **Setup → Tracked metrics** is a list of tick boxes,

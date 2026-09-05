@@ -16,7 +16,7 @@ import { esc, fmtMinutes, fmtCompound } from './util.js';
 import { trackedMetrics, activeTypes } from './ui.js';
 import { supportsSides } from './feeding.js';
 import {
-  columnChart, groupedColumnChart, stackedColumnChart, legend, tableTwin, chartCard,
+  columnChart, groupedColumnChart, stackedColumnChart, lineChart, legend, tableTwin, chartCard,
 } from './charts.js';
 import {
   nutritionOn, shownNutrients, nutrientsOf, milkTypeIds, referenceFor, tidy,
@@ -114,9 +114,43 @@ export function chartableMetrics(type) {
       out.push({ key: f.key, label: f.label, kind: 'duration', unit: 'min', agg: aggOf(f) });
     } else if (f.type === 'toggle') {
       out.push({ key: f.key, label: f.label, kind: 'toggle', unit: '', agg: 'count' });
+    } else if (f.type === 'select') {
+      // One metric per option, each its own single-series chart.
+      //
+      // This is what was missing when choice fields were left unplotted: the
+      // objection was never to charting them, it was to putting every option on
+      // one chart, which needs a colour per option and the palette has two.
+      // Counted separately there is no such problem - each is one series in the
+      // first slot - and two of them can still pair through the combine switch,
+      // because both are counts of the same thing.
+      for (const o of f.options || []) {
+        const name = typeof o === 'string' ? o : o?.name;
+        if (!name) continue;
+        out.push({
+          key: optionKey(f.key, name),
+          label: `${f.label}: ${name}`,
+          kind: 'option',
+          unit: '',
+          agg: 'count',
+          field: f.key,
+          option: name,
+        });
+      }
     }
   }
   return out;
+}
+
+/**
+ * A config-safe key for one option of a choice field.
+ *
+ * Slugged rather than used raw, because the key becomes a path segment in
+ * `stats.buttons.<typeId>.<key>` and a dot in "Vit. D" would silently nest an
+ * object where a boolean belongs.
+ */
+export function optionKey(fieldKey, option) {
+  const slug = String(option).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `opt_${fieldKey}_${slug || 'x'}`;
 }
 
 /** Aggregations a number can be charted by, and what each is for. */
@@ -318,6 +352,8 @@ function tallyCustom(metrics, bucket, event) {
       cell.n += 1;
     } else if (m.kind === 'toggle') {
       if (d[m.key]) cell.n += 1;
+    } else if (m.kind === 'option') {
+      if (d[m.field] === m.option) cell.n += 1;
     } else {
       const n = numberOf(m, d);
       if (n === null) continue;
@@ -995,6 +1031,7 @@ function asHoursScale(metrics, peak) {
 /** The sentence under the title, saying which summary these columns are. */
 function summaryLine(type, m, hourly) {
   if (m.kind === 'count') return `Every ${type.label.toLowerCase()} logged`;
+  if (m.kind === 'option') return `How often "${m.option}" was the one given`;
   if (m.kind === 'toggle') return `How often "${m.label}" was ticked`;
   return {
     sum: `Added up over the ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
@@ -1008,7 +1045,11 @@ function summaryLine(type, m, hourly) {
  * settings list, where it sits under the button's own heading - on a chart it
  * has to carry the button's name itself, or a pair reads "How many and Rained".
  */
-const labelOf = (type, m) => (m.kind === 'count' ? type.label : m.label);
+const labelOf = (type, m) => {
+  if (m.kind === 'count') return type.label;
+  if (m.kind === 'option') return m.option;
+  return m.label;
+};
 
 /**
  * A metric's value as a person reads it: compound where the field says so,
@@ -1024,11 +1065,25 @@ function readValue(m, value, { duration = false } = {}) {
 const cardId = (type, metrics) =>
   `viz-c-${type.id}-${metrics.map((m) => m.key).join('-')}`.replace(/[^a-zA-Z0-9-]/g, '-');
 
+/**
+ * Whether a metric is measured rather than accumulated.
+ *
+ * The distinction decides the mark, not just the maths. A total or a count is a
+ * quantity, drawn as a column from zero because its length is the encoding. A
+ * latest or an average is a *reading* - a weight, a length, a temperature - and
+ * columns are the wrong instrument for it twice over: they demand a zero
+ * baseline, which flattens the only part of a growth curve worth seeing, and
+ * they draw a bar on days nobody measured anything.
+ */
+const isMeasured = (m) => m.agg === 'last' || m.agg === 'avg';
+
 /** One metric, one chart. The shape this screen had before combining existed. */
 function singleCard(cfg, type, m, rows, avg, width, hourly) {
   const id = `${type.id}.${m.key}`;
   const data = rows.map((r) => ({ ...r, value: metricValue(m, r.custom[id]) }));
   if (!data.some((r) => r.value > 0)) return '';
+
+  if (isMeasured(m)) return measuredCard(cfg, type, m, data, width, hourly);
 
   const mean = avg.custom[id] || 0;
   const duration = m.kind === 'duration' && m.agg !== 'count';
@@ -1057,6 +1112,48 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
         label: duration ? 'Time' : (m.unit || 'Count'),
         get: (r) => readValue(m, r.value, { duration }),
       }],
+    }),
+  });
+}
+
+/**
+ * A reading over time: a line with a free baseline, and gaps where there is no
+ * reading rather than zeros.
+ *
+ * A weekly weigh-in leaves six days in seven empty. Those are days nobody put
+ * the baby on the scales, not days she weighed nothing, so they are holes in the
+ * line - and the axis frames the range the readings actually occupy.
+ */
+function measuredCard(cfg, type, m, data, width, hourly) {
+  const points = data.map((r) => ({ ...r, value: r.value > 0 ? r.value : null }));
+  const readings = points.filter((r) => r.value !== null).length;
+  const duration = m.kind === 'duration';
+  const say = (v) => String(readValue(m, v, { duration }));
+  const vizId = cardId(type, [m]);
+
+  const what = m.agg === 'last'
+    ? `The last reading each ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`
+    : `The ${xLabel(hourly)}'s average${m.unit ? ` · ${m.unit}` : ''}`;
+
+  return chartCard({
+    id: vizId,
+    title: `${type.emoji} ${labelOf(type, m)}`,
+    subtitle: what,
+    svg: lineChart({
+      rows: points,
+      width,
+      unit: m.unit,
+      title: labelOf(type, m),
+      decimals: m.minor ? 2 : 1,
+      format: (v) => say(v),
+    }),
+    note: readings < 2
+      ? 'One reading so far — the shape of this only means anything once there are a few.'
+      : 'Days with no reading are gaps, not zeros, and the axis frames the range rather than starting at nought — this is a curve to read, not bars to compare.',
+    table: tableTwin({
+      id: vizId,
+      rows: points.filter((r) => r.value !== null),
+      columns: [{ label: m.unit || 'Reading', get: (r) => say(r.value) }],
     }),
   });
 }

@@ -457,7 +457,9 @@ export function openTypeSheet(typeId = null) {
     <label class="field"><span class="lab">Icon</span>${emojiPicker('emoji', t.emoji, TYPE_EMOJI)}</label>
     <label class="field"><span class="lab">Colour</span>${tonePicker(t.tone)}</label>
     ${segField('How it logs', 'mode', t.mode, [
-      { value: 'instant', label: '⚡ One tap' }, { value: 'timer', label: '⏱️ Timer' },
+      { value: 'instant', label: '⚡ One tap' },
+      { value: 'timer', label: '⏱️ Timer' },
+      { value: 'form', label: '✍️ Ask me' },
     ])}
     <label class="field"><span class="lab">Sound</span>
       <div class="preset-row">
@@ -1270,13 +1272,14 @@ function customChartsCard(cfg) {
             `stats.stack.${type.id}`,
             stackCharts(cfg, type),
           ) : ''}
-        ${(type.fields || []).some((f) => f.type === 'select' || f.type === 'color') ? `
+        ${(type.fields || []).some((f) => f.type === 'color') ? `
           <p class="small muted" style="margin:2px 0 10px">
-            Its choice and colour fields are not in this list. Charting one means
-            a colour per option, and the chart palette here has two — stepped for
-            light and dark and checked for colour-vision deficiency — so those
-            stay in the entries and the CSV rather than being drawn in colours
-            nobody has checked.
+            Its colour fields are not in this list. A colour has too many options
+            to count one chart each, and putting them on one chart needs a colour
+            per option where the palette here has two — stepped for light and
+            dark and checked for colour-vision deficiency. They stay in the
+            entries and the CSV rather than being drawn in colours nobody has
+            checked.
           </p>` : ''}
       `).join('')}
     </div>`;
