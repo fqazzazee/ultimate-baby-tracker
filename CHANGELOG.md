@@ -3,7 +3,12 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
-## Unreleased
+## 1.8.0 — 2026-09-04
+
+> Numbered 1.8.0 rather than 1.7.0 so that this and the Android package, which
+> takes its version from this file's `package.json`, describe the same release.
+> 1.7.0 was an Android-and-website release with no changes to the self-hosted
+> app, so it has no entry here.
 
 ### Nursing, side by side
 
