@@ -90,6 +90,24 @@ export function fmtMinutes(min) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/**
+ * A number written the way it is read aloud: 7.31 lb as "7 lb 4.9 oz".
+ *
+ * Pounds and ounces, feet and inches, stone and pounds - one quantity that
+ * everyday use splits across two units. The value stored and charted is always
+ * the decimal, because that is the only form an axis can order or average; this
+ * is for the places a person reads rather than a chart plots.
+ */
+export function fmtCompound(value, unit, minorUnit, per, dp = 1) {
+  const v = Number(value) || 0;
+  const step = 10 ** dp;
+  let whole = Math.floor(v);
+  let rest = Math.round((v - whole) * per * step) / step;
+  // 7.999 lb rounds to 16 oz, which is not a reading anybody would write down.
+  if (rest >= per) { whole += 1; rest = 0; }
+  return `${whole} ${unit} ${rest} ${minorUnit}`;
+}
+
 /** A newborn-friendly age: days, then weeks, then months. */
 export function babyAge(birthDate) {
   if (!birthDate) return '';

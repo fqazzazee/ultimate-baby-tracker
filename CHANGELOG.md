@@ -3,6 +3,26 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.10.0 — 2026-09-05
+
+### Charts from your own buttons
+
+- **Pounds and ounces are one measurement, not two.** A number field can now
+  name another as its smaller unit, with how many make one whole. The pair then
+  charts as a single measure — 7.31 lb, a growth curve — instead of two charts
+  plotting "7" and "4.9" and asking the reader to combine them. Entries read
+  *7 lb 4.9 oz*, and the smaller field stops being offered as a chart of its
+  own, because on its own it is not one. Works for feet and inches, stone and
+  pounds, anything everyday use splits in two.
+- **A combined pair can be stacked into a total.** Where the two really are
+  parts of one thing — minutes in the pram, minutes carried — the column becomes
+  the sum and the segments the split, with the total labelled and carried in the
+  table twin. A separate switch from combining, because it is a stronger claim:
+  side by side says the two are comparable, stacking says they add up.
+- The stacked columns keep the house rules: a 2px gap in the surface colour
+  between segments rather than a stroke, and the rounded cap only on the top
+  one, so a stack still reads as a column anchored to the baseline.
+
 ## 1.9.0 — 2026-09-05
 
 ### Charts from your own buttons

@@ -189,6 +189,21 @@ palette has two slots; a third compatible metric keeps its own chart rather than
 being drawn in a colour nobody has checked. The switch names the pairs it will
 make before you turn it on.
 
+**Where a pair really adds up, stack it.** *Stack them into a total* makes the
+column the sum and the segments the split — right for minutes in the pram beside
+minutes carried, wrong for a morning and an evening temperature. It is a
+separate switch from combining because it is a stronger claim, and only you know
+which of your fields it is true of.
+
+**Pounds and ounces are one measurement.** In the field editor a number field can
+name another field as its smaller unit, with how many of it make one whole — 16
+ounces to the pound, 12 inches to the foot. The two then count as a single
+measure: one chart plotting 7.31 lb rather than two plotting "7" and "4.9",
+entries that read *7 lb 4.9 oz*, and the smaller field dropped from the chart
+list because on its own it is not a measure of anything. The decimal is what is
+stored and charted, because it is the only form an axis can order; the compound
+is what you read.
+
 A number that is *measured* rather than accumulated needs to say so. In the field
 editor, **On a chart, a day of these is** offers **Total**, **Average** and
 **Latest** — pick Latest for a weight or a temperature. Left on Total, a week of

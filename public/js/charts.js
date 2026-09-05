@@ -201,6 +201,71 @@ export function groupedColumnChart({
   return frame(width, height, title, `${axis(max, w, h)}${marks}`);
 }
 
+/**
+ * Two or three measures stacked into one column, where the height is the total.
+ *
+ * The difference from `groupedColumnChart` is an assertion, not a layout: a
+ * stack says these parts add up to something worth reading off the axis. That
+ * is true of left and right minutes at the breast and false of a high and a low
+ * temperature, so nothing here decides it - the caller does, and Setup makes the
+ * user say it.
+ *
+ * Segments are separated by the same 2px gap in the surface colour the rest of
+ * these charts use between touching marks, and only the topmost gets the
+ * rounded cap, so a stack still reads as one column anchored to the baseline.
+ */
+export function stackedColumnChart({
+  rows, series, width = 640, height = 190, unit = '', title = '', decimals = 0,
+}) {
+  if (!rows.length || !series.length) return '';
+  const w = width - PAD.left - PAD.right;
+  const h = height - PAD.top - PAD.bottom;
+  const totalOf = (r) => series.reduce((a, s) => a + (r.values[s.key] || 0), 0);
+  const max = niceMax(Math.max(1, ...rows.map(totalOf)));
+  const band = w / rows.length;
+  const barW = Math.min(MAX_BAR, Math.max(3, band - GAP - Math.min(10, band * 0.25)));
+  const peak = rows.reduce((best, r, i) => (totalOf(r) > totalOf(rows[best]) ? i : best), 0);
+  const showEvery = Math.ceil(rows.length / 8);
+
+  const marks = rows.map((r, i) => {
+    const x = PAD.left + band * i + (band - barW) / 2;
+    const total = totalOf(r);
+    const present = series.filter((s) => (r.values[s.key] || 0) > 0);
+    let below = 0;
+
+    const segments = series.map((s) => {
+      const v = r.values[s.key] || 0;
+      if (v <= 0) return '';
+      const full = (v / max) * h;
+      const y = PAD.top + h - (below + full);
+      below += full;
+      // The gap sits under each segment except the lowest, which keeps the
+      // column's foot flat on the baseline.
+      const bottom = s === present[0] ? 0 : GAP;
+      const segH = Math.max(0.5, full - bottom);
+      const capped = s === present[present.length - 1];
+      const d = capped
+        ? columnPath(x, y, barW, segH)
+        : `M${x} ${(y + segH).toFixed(1)}V${y.toFixed(1)}h${barW.toFixed(1)}v${segH.toFixed(1)}Z`;
+      const tip = `${r.full || r.label} · ${s.label}: ${v.toFixed(decimals)}${unit ? ` ${unit}` : ''}`;
+      return `<g class="viz-band" tabindex="0" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}">
+        <path class="viz-mark ${s.slot}" d="${d}"></path></g>`;
+    }).join('');
+
+    // The total is the thing a stack exists to show, so the tallest one is
+    // labelled - the same treatment the single-series chart gives its peak.
+    const label = i === peak && total > 0
+      ? `<text class="viz-value" x="${(x + barW / 2).toFixed(1)}" y="${(PAD.top + h - (total / max) * h - 5).toFixed(1)}" text-anchor="middle">${esc(total.toFixed(decimals))}</text>`
+      : '';
+    const tick = i % showEvery === 0
+      ? `<text class="viz-tick" x="${(x + barW / 2).toFixed(1)}" y="${height - 8}" text-anchor="middle">${esc(r.label)}</text>`
+      : '';
+    return segments + label + tick;
+  }).join('');
+
+  return frame(width, height, title, `${axis(max, w, h)}${marks}`);
+}
+
 /** Swatch + name pairs. Always drawn when a chart carries two or more series. */
 export function legend(series) {
   return `<div class="viz-legend">
