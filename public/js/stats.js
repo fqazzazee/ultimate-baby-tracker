@@ -13,7 +13,8 @@
 import { state, config, currentBaby } from './core.js';
 import { api } from './api.js';
 import { esc, fmtMinutes } from './util.js';
-import { trackedMetrics } from './ui.js';
+import { trackedMetrics, activeTypes } from './ui.js';
+import { supportsSides } from './feeding.js';
 import {
   columnChart, groupedColumnChart, legend, tableTwin, chartCard,
 } from './charts.js';
@@ -41,7 +42,105 @@ function chartPrefs(cfg) {
     sleep: on('sleep'),
     pump: on('pump'),
     clock: on('clock'),
+    sides: on('sides'),
   };
+}
+
+/**
+ * Whether a per-button chart is drawn.
+ *
+ * These are not in the shipped defaults - the keys depend on buttons that did
+ * not exist when the app was installed - so the default is carried here rather
+ * than in `defaultConfig()`. A button somebody made themselves is on: they made
+ * it to track something, and a chart of it is the point. One of the eight that
+ * ship is off until asked for, so nobody who never touched Setup finds three
+ * new charts of bath times on their Statistics screen.
+ */
+export function customChartOn(cfg, type, metricKey) {
+  // Its own branch of the config rather than a key in `stats.charts`: the
+  // hand-written charts keep flat booleans there, and one of them is already
+  // called `sleep` - which is also the id of a button. Nesting these under
+  // `stats.buttons` keeps a chart switch and a button's chart switches from
+  // ever being the same key.
+  const want = cfg?.stats?.buttons?.[type.id];
+  const value = want && typeof want === 'object' ? want[metricKey] : undefined;
+  return value === undefined ? !type.builtin : value !== false;
+}
+
+/* ------------------------------------------------- charts from any button */
+
+/**
+ * Types that already have a chart written for them by hand. The generic
+ * builder leaves them alone rather than drawing a second, worse version of
+ * something the bespoke card already says better.
+ */
+function bespokeTypeIds(cfg) {
+  const ids = new Set(milkTypeIds(cfg));
+  ids.add('diaper');
+  ids.add('sleep');
+  ids.add('pump');
+  return ids;
+}
+
+/**
+ * What a button can be charted by, read off the fields it records.
+ *
+ * Every button can answer "how many a day". Beyond that, a field is chartable
+ * when it is a quantity: a number to add up, a stretch of time to total, or a
+ * yes/no to count the yeses.
+ *
+ * Choice and colour fields are deliberately absent. Charting one means a series
+ * per option, and the palette here has two slots on purpose - stepped for light
+ * and dark and checked for colour-vision deficiency - so an eleven-colour poop
+ * chart would either repeat colours or invent unvalidated ones. Setup says this
+ * out loud rather than leaving the omission to be noticed.
+ */
+export function chartableMetrics(type) {
+  const out = [{ key: 'count', label: 'How many', kind: 'count', unit: '', agg: 'count' }];
+  for (const f of type.fields || []) {
+    if (f.type === 'number') {
+      out.push({ key: f.key, label: f.label, kind: 'number', unit: f.unit || '', agg: aggOf(f) });
+    } else if (f.type === 'duration') {
+      out.push({ key: f.key, label: f.label, kind: 'duration', unit: 'min', agg: aggOf(f) });
+    } else if (f.type === 'toggle') {
+      out.push({ key: f.key, label: f.label, kind: 'toggle', unit: '', agg: 'count' });
+    }
+  }
+  return out;
+}
+
+/** Aggregations a number can be charted by, and what each is for. */
+export const AGGREGATIONS = [
+  { value: 'sum', label: 'Total', hint: 'Added up over the day — for amounts' },
+  { value: 'avg', label: 'Average', hint: 'The mean of the day\'s entries' },
+  { value: 'last', label: 'Latest', hint: 'The last one that day — for measurements' },
+];
+
+/**
+ * How a field's numbers combine over a day.
+ *
+ * The default is `sum`, which is right for anything you are accumulating - cc
+ * of milk, minutes of tummy time - and badly wrong for anything you are
+ * measuring. Three weigh-ins added up says a 7 lb baby weighs 21 lb, which is
+ * not a chart with a rough edge, it is a chart that lies. A field can say which
+ * it is; the field editor in Setup offers the choice.
+ */
+function aggOf(field) {
+  return ['sum', 'avg', 'last'].includes(field.agg) ? field.agg : 'sum';
+}
+
+/** typeId -> its chartable metrics, for the tally pass. */
+function customMetricMap(cfg) {
+  return new Map(customChartTypes(cfg).map((x) => [x.type.id, x.metrics]));
+}
+
+/** The buttons the generic builder is responsible for, with their metrics. */
+export function customChartTypes(cfg) {
+  const bespoke = bespokeTypeIds(cfg);
+  return activeTypes(cfg)
+    .filter((t) => !bespoke.has(t.id))
+    .map((t) => ({ type: t, metrics: chartableMetrics(t) }))
+    .filter((x) => x.metrics.length);
 }
 
 /* ------------------------------------------------------------- date walking */
@@ -108,9 +207,12 @@ export async function loadStats() {
 const emptyBucket = () => ({
   values: {
     ml: 0, feeds: 0, wet: 0, dirty: 0, sleepMin: 0, longestSleep: 0, unmeasured: 0,
-    pumpMl: 0, pumps: 0,
+    pumpMl: 0, pumps: 0, leftMin: 0, rightMin: 0, nursedMin: 0,
   },
   nutrients: {},
+  // "<typeId>.<metricKey>" -> running total, for the charts built from a
+  // button's own fields rather than from a hand-written one.
+  custom: {},
 });
 
 /** Fold one entry into whichever bucket its timestamp falls in. */
@@ -148,6 +250,53 @@ function tally(cfg, milkIds, bucket, event) {
     v.pumps += 1;
     v.pumpMl += Number(d.amount) || 0;
   }
+  // Time at the breast, split by side. Counted off the entry's own fields, so
+  // a feed logged or corrected by hand counts exactly like a timed one.
+  const left = Number(d.leftMin) || 0;
+  const right = Number(d.rightMin) || 0;
+  if (left || right) {
+    v.leftMin += left;
+    v.rightMin += right;
+    v.nursedMin += left + right;
+  }
+}
+
+/**
+ * Fold one entry into whatever generic metrics its button declares.
+ *
+ * Each cell keeps the count, the running total and the latest value with its
+ * timestamp, so the same pass answers "total", "average" and "latest" without
+ * knowing in advance which of them a chart is going to ask for.
+ */
+function tallyCustom(metrics, bucket, event) {
+  const list = metrics.get(event.typeId);
+  if (!list) return;
+  const d = event.data || {};
+  for (const m of list) {
+    const id = `${event.typeId}.${m.key}`;
+    const cell = bucket.custom[id] || (bucket.custom[id] = { n: 0, sum: 0, last: 0, at: '' });
+    if (m.kind === 'count') {
+      cell.n += 1;
+    } else if (m.kind === 'toggle') {
+      if (d[m.key]) cell.n += 1;
+    } else {
+      const n = Number(d[m.key]);
+      if (!Number.isFinite(n)) continue;
+      cell.n += 1;
+      cell.sum += n;
+      // Entries arrive newest-first, so only an older one may overwrite.
+      if (!cell.at || event.at > cell.at) { cell.last = n; cell.at = event.at; }
+    }
+  }
+}
+
+/** One number out of a cell, according to what the metric asked for. */
+export function metricValue(metric, cell) {
+  if (!cell) return 0;
+  if (metric.agg === 'count') return cell.n;
+  if (metric.agg === 'avg') return cell.n ? cell.sum / cell.n : 0;
+  if (metric.agg === 'last') return cell.last;
+  return cell.sum;
 }
 
 /**
@@ -161,6 +310,7 @@ function tally(cfg, milkIds, bucket, event) {
  */
 function dailyRows(cfg, events, days) {
   const milkIds = milkTypeIds(cfg);
+  const metrics = customMetricMap(cfg);
   const today = startOfDay();
   const oldest = events.reduce((a, e) => (a === null || e.at < a ? e.at : a), null);
   let span = days;
@@ -181,7 +331,7 @@ function dailyRows(cfg, events, days) {
 
   for (const e of events) {
     const row = rows.get(bucketKey(new Date(e.at)));
-    if (row) tally(cfg, milkIds, row, e);
+    if (row) { tally(cfg, milkIds, row, e); tallyCustom(metrics, row, e); }
   }
   return [...rows.values()];
 }
@@ -195,6 +345,7 @@ function dailyRows(cfg, events, days) {
  */
 function hourlyBuckets(cfg, events, width) {
   const milkIds = milkTypeIds(cfg);
+  const metrics = customMetricMap(cfg);
   const step = width < 420 ? 2 : 1;
   const start = startOfDay();
   const nowHour = new Date().getHours();
@@ -217,7 +368,7 @@ function hourlyBuckets(cfg, events, width) {
     const at = new Date(e.at);
     if (at < start) continue;
     const row = rows[Math.floor(at.getHours() / step)];
-    if (row) tally(cfg, milkIds, row, e);
+    if (row) { tally(cfg, milkIds, row, e); tallyCustom(metrics, row, e); }
   }
   return rows;
 }
@@ -259,10 +410,14 @@ function clockRows(cfg, events, width) {
  * Every figure here uses the same denominator, so the headline tiles and the
  * reference lines on the charts can never disagree about what "per day" means.
  */
-function averages(rows, hourly) {
+function averages(rows, hourly, metricsByKey = new Map()) {
   const done = !hourly && rows.length > 1 ? rows.slice(0, -1) : rows;
+  // A day whose only entry was on a button of your own is still a day with
+  // something in it; leaving it out would divide that button's own chart by a
+  // denominator that pretends the day never happened.
   const withData = done.filter((r) => r.values.feeds || r.values.wet
-    || r.values.dirty || r.values.sleepMin || r.values.pumps);
+    || r.values.dirty || r.values.sleepMin || r.values.pumps
+    || Object.values(r.custom).some((c) => c && c.n));
   const base = withData.length || 1;
   const sum = (pick) => done.reduce((a, r) => a + pick(r), 0);
 
@@ -272,9 +427,37 @@ function averages(rows, hourly) {
   }
   for (const k of Object.keys(nutrients)) nutrients[k] /= base;
 
+  // Every generic metric gets the same denominator as everything else, so a
+  // per-day figure on a custom chart means what it means everywhere else. The
+  // mean is taken over each day's *resolved* value, so the average line under a
+  // "latest weight" chart is the average of the daily weights rather than of
+  // some total nobody asked for.
+  const custom = {};
+  for (const r of done) {
+    for (const [k, cell] of Object.entries(r.custom)) {
+      const m = metricsByKey.get(k);
+      if (!m) continue;
+      const bin = custom[k] || (custom[k] = { total: 0, days: 0 });
+      bin.total += metricValue(m, cell);
+      // A "latest" or "average" metric skips days it never happened on rather
+      // than averaging a zero in, which would drag a weight chart towards nil.
+      if (m.agg === 'sum' || m.agg === 'count' || cell.n) bin.days += 1;
+    }
+  }
+  for (const k of Object.keys(custom)) {
+    const m = metricsByKey.get(k);
+    custom[k] = (m.agg === 'sum' || m.agg === 'count')
+      ? custom[k].total / base
+      : custom[k].total / (custom[k].days || 1);
+  }
+
   return {
     buckets: withData.length,
     partial: !hourly && rows.length > 1,
+    custom,
+    leftMin: sum((r) => r.values.leftMin) / base,
+    rightMin: sum((r) => r.values.rightMin) / base,
+    nursedMin: sum((r) => r.values.nursedMin) / base,
     ml: sum((r) => r.values.ml) / base,
     feeds: sum((r) => r.values.feeds) / base,
     wet: sum((r) => r.values.wet) / base,
@@ -292,12 +475,20 @@ function averages(rows, hourly) {
 function totals(rows) {
   const out = {
     ml: 0, feeds: 0, wet: 0, dirty: 0, sleepMin: 0, longestSleep: 0, unmeasured: 0,
-    pumpMl: 0, pumps: 0, nutrients: {},
+    pumpMl: 0, pumps: 0, leftMin: 0, rightMin: 0, nursedMin: 0,
+    nutrients: {}, custom: {},
   };
   for (const r of rows) {
-    for (const k of ['ml', 'feeds', 'wet', 'dirty', 'sleepMin', 'unmeasured', 'pumpMl', 'pumps']) out[k] += r.values[k];
+    for (const k of ['ml', 'feeds', 'wet', 'dirty', 'sleepMin', 'unmeasured', 'pumpMl',
+      'pumps', 'leftMin', 'rightMin', 'nursedMin']) out[k] += r.values[k];
     out.longestSleep = Math.max(out.longestSleep, r.values.longestSleep);
     for (const [k, v] of Object.entries(r.nutrients)) out.nutrients[k] = (out.nutrients[k] || 0) + v;
+    for (const [k, cell] of Object.entries(r.custom)) {
+      const bin = out.custom[k] || (out.custom[k] = { n: 0, sum: 0, last: 0, at: '' });
+      bin.n += cell.n;
+      bin.sum += cell.sum;
+      if (!bin.at || cell.at > bin.at) { bin.last = cell.last; bin.at = cell.at; }
+    }
   }
   return out;
 }
@@ -358,17 +549,25 @@ export function renderStats() {
   const rows = hourly
     ? hourlyBuckets(cfg, state.stats.events, width)
     : dailyRows(cfg, state.stats.events, days);
-  const avg = averages(rows, hourly);
+  const metricsByKey = new Map(
+    customChartTypes(cfg).flatMap(({ type, metrics }) => metrics.map((m) => [`${type.id}.${m.key}`, m])),
+  );
+  const avg = averages(rows, hourly, metricsByKey);
   const sum = totals(rows);
   const weight = Number(baby.weightKg) || 0;
   const on = trackedMetrics(cfg);
   const charts = chartPrefs(cfg);
   const nutrition = nutritionOn(cfg) && on.feeds;
+  // Only worth any of the nursing furniture when a button records sides at all
+  // and something in this range actually used it.
+  const nursing = activeTypes(cfg).some(supportsSides)
+    && rows.some((r) => r.values.nursedMin > 0);
 
   // A one-day view reports today's totals; a longer one reports the daily mean.
   const head = hourly
     ? { ml: sum.ml, feeds: sum.feeds, wet: sum.wet, dirty: sum.dirty, sleepMin: sum.sleepMin,
-        pumpMl: sum.pumpMl, longestSleep: sum.longestSleep, kcal: sum.nutrients.kcal || 0 }
+        pumpMl: sum.pumpMl, longestSleep: sum.longestSleep, kcal: sum.nutrients.kcal || 0,
+        nursedMin: sum.nursedMin, leftMin: sum.leftMin, rightMin: sum.rightMin }
     : avg;
   const per = hourly ? 'today' : '/ day';
 
@@ -390,6 +589,8 @@ export function renderStats() {
           ${on.diapers ? statTile(`Wet ${per}`, head.wet ? head.wet.toFixed(hourly ? 0 : 1) : '—', '') : ''}
           ${on.diapers ? statTile(`Dirty ${per}`, head.dirty ? head.dirty.toFixed(hourly ? 0 : 1) : '—', '') : ''}
           ${on.pump ? statTile(`cc pumped ${per}`, head.pumpMl ? Math.round(head.pumpMl) : '—', '') : ''}
+          ${nursing ? statTile(`Nursing ${per}`, head.nursedMin ? fmtMinutes(Math.round(head.nursedMin)) : '—',
+            head.nursedMin ? `${Math.round((head.leftMin / head.nursedMin) * 100)}% left` : '') : ''}
           ${nutrition ? statTile(`kcal ${per}`, head.kcal ? Math.round(head.kcal) : '—', weight && head.kcal ? `${(head.kcal / weight).toFixed(0)} kcal/kg` : '') : ''}
         </div>
         <p class="small muted" style="margin:12px 0 0">
@@ -403,8 +604,10 @@ export function renderStats() {
       ${on.diapers && charts.diapers ? diaperChart(rows, width, hourly) : ''}
       ${on.sleep && charts.sleep ? sleepChart(rows, avg, width, hourly) : ''}
       ${on.pump && charts.pump ? pumpChart(rows, avg, width, hourly) : ''}
+      ${nursing && charts.sides ? sidesChart(rows, avg, width, hourly) : ''}
       ${nutrition ? nutrientCharts(cfg, rows, avg, width, baby, hourly) : ''}
       ${on.feeds && charts.clock && !hourly ? clockChart(cfg, state.stats.events, width) : ''}
+      ${customCharts(cfg, rows, avg, width, hourly)}
 
       ${untrackedNote(on, charts)}
 
@@ -444,6 +647,7 @@ function untrackedNote(on, charts) {
   if (on.sleep && !charts.sleep) hidden.push('Sleep');
   if (on.pump && !charts.pump) hidden.push('Pumped');
   if (on.feeds && !charts.clock) hidden.push('When feeds happen');
+  if (!charts.sides) hidden.push('Nursing by side');
 
   return `
     ${off.length ? `<p class="small muted" style="margin:0 4px 8px">
@@ -636,6 +840,127 @@ function pumpChart(rows, avg, width, hourly) {
       ],
     }),
   });
+}
+
+/**
+ * Left against right, and with it how long the baby actually spent nursing.
+ *
+ * Two series and one axis, which is what the palette here is built for. The
+ * question it answers is the one a nursing parent is usually asked at a
+ * check-up and cannot answer from a stack of durations: is one side being
+ * favoured, and is it getting worse.
+ */
+function sidesChart(rows, avg, width, hourly) {
+  const sessions = rows.reduce((a, r) => a + (r.values.nursedMin > 0 ? 1 : 0), 0);
+  if (!sessions) return '';
+
+  const series = [
+    { key: 'leftMin', label: 'Left', slot: 's1' },
+    { key: 'rightMin', label: 'Right', slot: 's2' },
+  ];
+  const left = rows.reduce((a, r) => a + r.values.leftMin, 0);
+  const right = rows.reduce((a, r) => a + r.values.rightMin, 0);
+  const total = left + right;
+  // A split is only worth remarking on once there is enough of it to mean
+  // something; under an hour a single long feed swings it entirely.
+  const skew = total >= 60 ? Math.round((Math.max(left, right) / total) * 100) : null;
+
+  return chartCard({
+    id: 'viz-sides',
+    title: `Nursing by side per ${xLabel(hourly)}`,
+    subtitle: `Minutes at the breast${skew !== null && skew >= 60
+      ? ` · ${skew}% on the ${left > right ? 'left' : 'right'}`
+      : ''}`,
+    legendHTML: legend(series),
+    svg: groupedColumnChart({ rows, series, width, unit: 'min', title: 'Nursing by side' }),
+    note: [
+      'Only feeds whose sides were timed appear here — a nursing session logged as one total has no split to draw.',
+      skew !== null && skew >= 65
+        ? 'A lasting preference for one side is worth mentioning at your next visit; it is common, usually harmless, and occasionally worth looking at.'
+        : '',
+    ].filter(Boolean).join(' '),
+    table: tableTwin({
+      id: 'viz-sides',
+      rows,
+      columns: [
+        { label: 'Left', get: (r) => (r.values.leftMin ? fmtMinutes(Math.round(r.values.leftMin)) : '—') },
+        { label: 'Right', get: (r) => (r.values.rightMin ? fmtMinutes(Math.round(r.values.rightMin)) : '—') },
+        { label: 'Total', get: (r) => (r.values.nursedMin ? fmtMinutes(Math.round(r.values.nursedMin)) : '—') },
+      ],
+    }),
+  });
+}
+
+/**
+ * One chart per metric a button of your own declares.
+ *
+ * Built from the button's own fields, so a "Tummy time" button with a duration
+ * on it gets minutes a day and a "Weight" button with a number gets its own
+ * column chart, with no chart code written for either. A metric with nothing in
+ * the range draws nothing rather than a row of zeros.
+ */
+function customCharts(cfg, rows, avg, width, hourly) {
+  const cards = customChartTypes(cfg).flatMap(({ type, metrics }) => metrics
+    .filter((m) => customChartOn(cfg, type, m.key))
+    .map((m) => {
+      const id = `${type.id}.${m.key}`;
+      const data = rows.map((r) => ({ ...r, value: metricValue(m, r.custom[id]) }));
+      if (!data.some((r) => r.value > 0)) return '';
+
+      const mean = avg.custom[id] || 0;
+      const duration = m.kind === 'duration' && m.agg !== 'count';
+      // Minutes are the stored unit but hours are the readable one once a day's
+      // worth piles up; the table twin keeps the exact figure either way.
+      const asHours = duration && Math.max(...data.map((r) => r.value)) >= 120;
+      const scaled = asHours ? data.map((r) => ({ ...r, value: r.value / 60 })) : data;
+      const unit = asHours ? 'h' : (m.kind === 'count' || m.kind === 'toggle' ? '' : m.unit);
+      const decimals = asHours ? 1 : 0;
+
+      // Say which of the three summaries this is, so a column is never
+      // mistaken for a total it is not.
+      const what = m.kind === 'count'
+        ? `Every ${type.label.toLowerCase()} logged`
+        : m.kind === 'toggle'
+          ? `How often "${m.label}" was ticked`
+          : {
+            sum: `Added up over the ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
+            avg: `Average of the ${xLabel(hourly)}'s entries${m.unit ? ` · ${m.unit}` : ''}`,
+            last: `The last one recorded each ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
+          }[m.agg];
+
+      return chartCard({
+        id: `viz-c-${id.replace(/[^a-zA-Z0-9]/g, '-')}`,
+        title: `${type.emoji} ${m.kind === 'count' ? type.label : m.label} per ${xLabel(hourly)}`,
+        subtitle: what,
+        svg: columnChart({
+          rows: scaled,
+          width,
+          unit,
+          title: m.label,
+          decimals,
+          avg: hourly ? null : (asHours ? mean / 60 : mean),
+          avgDecimals: 1,
+        }),
+        table: tableTwin({
+          id: `viz-c-${id.replace(/[^a-zA-Z0-9]/g, '-')}`,
+          rows: data,
+          columns: [{
+            label: duration ? 'Time' : (m.unit || 'Count'),
+            get: (r) => (duration
+              ? (r.value ? fmtMinutes(Math.round(r.value)) : '—')
+              : Math.round(r.value * 100) / 100),
+          }],
+        }),
+      });
+    })).filter(Boolean).join('');
+
+  if (!cards) return '';
+  return `<div class="section-title">Your own buttons</div>
+    <p class="small muted" style="margin:-4px 4px 10px">
+      Drawn from the fields each button records. Choose which of them appear in
+      Setup → Statistics.
+    </p>
+    ${cards}`;
 }
 
 function clockChart(cfg, events, width) {

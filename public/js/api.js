@@ -49,6 +49,28 @@ export const api = {
 };
 
 /**
+ * Unattended backups, performed by the server this page is served from.
+ *
+ * The work happens in lib/autobackup.js; this is the remote control for it. A
+ * browser has nowhere of its own to write, which is why the schedule, the
+ * destination and the retention all live on the server side and this file only
+ * asks it questions.
+ *
+ * `canPickFolder` is false because there is no picker to open: the destination
+ * is `data/backups/`, or wherever `BT_BACKUP_DIR` points. The field exists so
+ * the Setup card can branch on whether a picker is available rather than on
+ * which build it is running in.
+ */
+export const autoBackup = {
+  available: true,
+  canPickFolder: false,
+  status: () => request('/api/backup/auto'),
+  now: () => request('/api/backup/auto/run', { method: 'POST', body: {} }),
+  pickFolder: () => false,
+  clearFolder: () => request('/api/backup/auto'),
+};
+
+/**
  * Subscribe to server changes. Uses SSE when available and falls back to
  * polling; `onStatus` reports connectivity so the UI can show an offline bar.
  */

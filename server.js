@@ -16,6 +16,7 @@ import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as store from './lib/store.js';
+import * as autobackup from './lib/autobackup.js';
 import { computeAlarmInstances, instanceKey } from './lib/alarms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -195,11 +196,8 @@ function exportCSV(url) {
 
 const BACKUP_MAGIC = [0x1f, 0x8b]; // gzip
 
-function backupFilename() {
-  const now = new Date();
-  const stamp = `${now.toISOString().slice(0, 10)}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-  return `baby-tracker-backup-${stamp}.json.gz`;
-}
+/** Shared with the scheduler, so a downloaded copy and a written one match. */
+const backupFilename = autobackup.backupFilename;
 
 /**
  * Accept what the browser actually sends back: the gzipped bundle we wrote, or
@@ -242,13 +240,23 @@ async function handleAPI(req, res, url) {
     });
   }
 
-  if (resource === 'backup' && method === 'GET') {
+  // `!id` matters: /api/backup/auto is also a GET on `backup`, and without it
+  // the status request would be answered with a whole backup file.
+  if (resource === 'backup' && !id && method === 'GET') {
     const body = zlib.gzipSync(Buffer.from(`${JSON.stringify(store.exportBundle(APP), null, 2)}\n`, 'utf8'));
     return send(res, 200, body, {
       'content-type': 'application/gzip',
       'content-disposition': `attachment; filename="${backupFilename()}"`,
       'content-length': body.length,
     });
+  }
+
+  if (resource === 'backup' && id === 'auto') {
+    if (method === 'GET') return sendJSON(res, 200, autobackup.status());
+    if (method === 'POST' && action === 'run') {
+      const result = autobackup.run();
+      return sendJSON(res, result.ok ? 200 : 500, { ...autobackup.status(), ok: result.ok });
+    }
   }
 
   if (resource === 'restore' && method === 'POST') {
@@ -417,6 +425,7 @@ server.on('error', (err) => {
 });
 
 store.init();
+autobackup.start(APP);
 server.listen(PORT, HOST, () => {
   console.log(`\n  🍼 ${APP.name} v${APP.version}`);
   console.log(`     http://localhost:${PORT}   (data: ${store.dataDir()})\n`);

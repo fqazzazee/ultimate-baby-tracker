@@ -19,6 +19,19 @@ seconds afterwards, so a mis-tap costs nothing.
   baby lives in **Setup**, out of the way of accidental taps.
 - **Breastfeed** and **Sleep** are timers: first tap starts, second tap stops
   and saves the duration. A running timer survives a server restart.
+- **A breastfeed times each side separately.** The running card shows a clock
+  per breast with the one currently feeding ticking, and **Switch to
+  left/right** banks the side that was running and starts the other — as often
+  as you like. The entry ends up with the total *and* the split. The card also
+  says which side to start on next (**next: right**), alternating from whichever
+  side opened the last feed; start wherever you like and the next suggestion
+  follows what you actually did.
+
+  The mid-feed bookkeeping is kept in the browser doing the feeding rather than
+  on the server, so a switch is instant and works with no network. Start a feed
+  on the phone and stop it on a laptop and the entry falls back to a plain total
+  and the side it began on — which is exactly what it recorded before per-side
+  timing existed.
 - The **⋯** button on any card opens the full form — amount, side, a different
   time, a note.
 - On a wide screen the page splits into three columns — buttons on the left, the
@@ -34,7 +47,7 @@ totals. Tap any entry to edit or delete it. Exports to CSV.
 **Alarms** — see below.
 
 **Setup** — babies, people, tracked metrics and their order, nutrition,
-statistics, theme and sound, plus an **About** card at the bottom with the version, links back to this repository and
+statistics, automatic backups, theme and sound, plus an **About** card at the bottom with the version, links back to this repository and
 the docs, and a reminder of the security posture above.
 
 ## Tracked metrics
@@ -140,6 +153,7 @@ have not happened yet are left off rather than drawn as zeros.
 | **Diapers** | Wet and dirty side by side — the everyday hydration check |
 | **Sleep** | Total from timed sleeps, plus the longest stretch |
 | **Pumped** | cc expressed per day — what came out, kept well away from intake so the bottle it becomes is never counted twice |
+| **Nursing by side** | Left against right in minutes — whether one breast is being favoured, and whether that is drifting |
 | **Nutrients** | One chart per nutrient you chose to show, each with the reference intake for a baby that age drawn across it |
 | **When feeds happen** | The shape of the day, and whether nights are settling |
 
@@ -155,6 +169,22 @@ hides the drawing and nothing else, so the headline tiles stay and every entry
 is still recorded. A line under the charts says which are hidden and which
 switch did it. Which nutrient charts appear follows **Setup → Nutrition → Show
 these nutrients**.
+
+**Buttons you made yourself are charted too**, from the fields they record, with
+nothing to set up: a number is added up, a duration is totalled, a yes/no is
+counted, and every button gets a plain count of entries per day. They appear
+under *Your own buttons* at the foot of the screen, and **Setup → Charts from
+your own buttons** has a switch for each. A button you invented arrives switched
+on; one that ships with the app arrives off, so the screen does not quietly grow
+three charts of bath times.
+
+A number that is *measured* rather than accumulated needs to say so. In the field
+editor, **On a chart, a day of these is** offers **Total**, **Average** and
+**Latest** — pick Latest for a weight or a temperature. Left on Total, a week of
+weigh-ins would be added together and the chart would claim a 7 lb baby weighs
+21 lb. Choice and colour fields are not charted at all: one colour per option
+would need a palette this app deliberately does not have, so those values stay in
+the entries, the table twins and the CSV.
 
 Every chart carries three things: a **Table** button that unfolds the same values
 as text, a **⬇️ download** button that saves it as a PNG with its title, subtitle
@@ -244,6 +274,30 @@ the file as private as the data folder itself. And before a restore overwrites
 anything, the current state is written to `data/pre-restore-<timestamp>.json`
 in the same format.
 
+### Automatic backups
+
+**Setup → Automatic backup** turns on a scheduled copy, off until you ask for it.
+The server checks every quarter of an hour and writes one when it is due, whether
+or not anybody has the page open — no cron entry, no systemd timer, nothing to
+install. The file is byte-for-byte the same kind of bundle the download button
+produces, so either restores anywhere, including onto the Android build.
+
+| | |
+| --- | --- |
+| **Where** | `data/backups/` by default — beside the journal, so whatever already copies the data folder picks it up |
+| **Somewhere else** | Set `BT_BACKUP_DIR` to a NAS mount, a Syncthing folder or a removable disk, and the copies leave this machine on their own |
+| **How often** | Daily or weekly |
+| **Retention** | The newest 7, 14 or 30; older ones are deleted |
+
+Pruning only ever touches files this app wrote (`baby-tracker-backup-*.json.gz`),
+by modification time, so pointing `BT_BACKUP_DIR` at a folder you keep other
+things in is safe. The card reports when the last copy was written and says so
+plainly when one failed — a mount can go away and a disk can fill up, and a
+backup that stopped working without saying so is the worst kind there is.
+
+> A copy of the data folder on the same disk is not a backup; it is a second
+> copy of a disk that can fail once. `BT_BACKUP_DIR` is the part that matters.
+
 Either half works from the command line as well:
 
 ```sh
@@ -261,7 +315,9 @@ data/
 ├── config.json    babies, people, buttons, alarms, milk profiles, settings
 ├── events.log     one JSON object per line, append-only
 ├── timers.json    timers currently running
-└── alarms.json    snooze / last-fired state
+├── alarms.json    snooze / last-fired state
+├── backup-state.json   when the last automatic backup ran, and whether it worked
+└── backups/       automatic backups, when they are switched on
 ```
 
 `events.log` is a journal: new entries are appended, edits and deletions are
@@ -283,4 +339,6 @@ tombstones pile up. Copying the folder is still the simplest backup there is.
 | `POST` | `/api/users/:id/{verify,pin}` | Check a profile PIN / set or clear one |
 | `GET` | `/api/export.csv?babyId=` | Spreadsheet export |
 | `GET` | `/api/backup` | Gzipped bundle of everything |
+| `GET` | `/api/backup/auto` | Where automatic backups go, and when the last one ran |
+| `POST` | `/api/backup/auto/run` | Write one now, ignoring the schedule |
 | `POST` | `/api/restore?dryRun=` | Restore a bundle, or just report what is in it |

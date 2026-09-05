@@ -87,12 +87,16 @@ export function summarize(event, type) {
       parts.push(`<span class="swatch" style="background:${esc(hex)}"></span>${esc(v)}`);
       continue;
     }
+    // A field with an `abbr` says which number it is. Without one, a nursing
+    // entry reads "Both · 19m · 8m · 11m" and nothing on the row says that the
+    // last two are the halves of the first.
+    const abbr = field.abbr ? `${esc(field.abbr)} ` : '';
     if (field.type === 'duration') {
-      parts.push(esc(fmtMinutes(v)));
+      parts.push(`${abbr}${esc(fmtMinutes(v))}`);
       continue;
     }
     if (field.type === 'number') {
-      parts.push(`${esc(v)}${field.unit ? ` ${esc(field.unit)}` : ''}`);
+      parts.push(`${abbr}${esc(v)}${field.unit ? ` ${esc(field.unit)}` : ''}`);
       continue;
     }
     parts.push(esc(v));

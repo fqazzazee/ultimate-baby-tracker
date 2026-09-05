@@ -11,6 +11,10 @@ import {
 import {
   typeOf, userOf, babyOf, toneStyle, fieldsHTML, collectFields, wireFieldControls,
 } from './ui.js';
+import {
+  supportsSides, startSession, readSession, writeSession, clearSession,
+  switched, finish, nextSide, sidesLine,
+} from './feeding.js';
 
 export const state = {
   data: null,                                   // last /api/state payload
@@ -28,6 +32,10 @@ export const state = {
   // The Statistics screen reads a longer window than /api/state carries, so it
   // keeps its own slice of the log, fetched only while that tab is open.
   stats: { days: 0, events: [], loading: true, error: null },
+  // What the server says about its own scheduled backups. Fetched when the
+  // Setup screen mounts rather than carried in /api/state, because nothing
+  // outside that one card ever asks.
+  backup: { loaded: false, busy: false, status: null },
   connected: true,
   ringingKey: null,
 };
@@ -276,12 +284,28 @@ export async function quickLog(typeId, presetId) {
   if (type.mode === 'timer') {
     const running = runningTimer(typeId);
     if (running) return stopRunningTimer(running.id);
+    const sides = supportsSides(type);
+    // Which breast this feed opens on. A Left or Right button says so outright;
+    // the Both button - and a bare tap on the card - takes the alternation the
+    // card is already showing, so the common case is one tap and no thinking.
+    const asked = preset.data?.side;
+    const opening = sides
+      ? ((asked === 'Left' || asked === 'Right') ? asked : suggestedSide(typeId) || 'Left')
+      : null;
     try {
-      await api.startTimer({
-        babyId: baby.id, userId: user.id, typeId, presetId: preset.id, data: { ...preset.data },
+      const { timer } = await api.startTimer({
+        babyId: baby.id,
+        userId: user.id,
+        typeId,
+        presetId: preset.id,
+        data: sides
+          ? { ...preset.data, side: opening, firstSide: opening }
+          : { ...preset.data },
       });
+      if (sides && timer) startSession(timer, opening);
       feedback({ mark: '⏱️', soundName: 'ding' });
-      toast({ icon: '⏱️', text: `<b>${esc(type.label)}</b> started${preset.label && preset.label !== type.label ? ` · ${esc(preset.label)}` : ''}`, tone: type.tone });
+      const which = sides ? ` · ${esc(opening.toLowerCase())} side` : '';
+      toast({ icon: '⏱️', text: `<b>${esc(type.label)}</b> started${which || (preset.label && preset.label !== type.label ? ` · ${esc(preset.label)}` : '')}`, tone: type.tone });
       await refresh();
     } catch (err) {
       toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
@@ -322,16 +346,72 @@ export async function undoEvent(id) {
   }
 }
 
-export async function stopRunningTimer(id) {
+/** Which breast to offer next on this button, from the entries already in hand. */
+export function suggestedSide(typeId) {
+  return nextSide(state.data?.events || [], typeId);
+}
+
+/** The timer object behind a running timer's id, or null. */
+function timerById(id) {
+  return (state.data?.timers || []).find((t) => t.id === id) || null;
+}
+
+/**
+ * Bank the breast that has been nursing and start the other one.
+ *
+ * The timer is re-issued rather than patched: every backend replaces a running
+ * timer for the same baby and button, and every one of them keeps a
+ * `startedAt` it is handed - so the session's own clock carries on untouched
+ * while the side it reports changes. See feeding.js for why there is no verb
+ * for this.
+ */
+export async function switchFeedSide(timerId, toSide) {
+  const timer = timerById(timerId);
+  if (!timer) return;
+  const type = typeOf(config(), timer.typeId);
+  if (!supportsSides(type)) return;
+
+  const current = readSession(timer)
+    || startSession(timer, timer.data?.side === 'Right' ? 'Right' : 'Left');
+  const next = switched(current, toSide);
+
   try {
-    const { event } = await api.stopTimer(id, { userId: state.userId });
-    const type = typeOf(config(), event.typeId);
+    const { timer: reissued } = await api.startTimer({
+      babyId: timer.babyId,
+      userId: timer.userId,
+      typeId: timer.typeId,
+      presetId: timer.presetId,
+      startedAt: timer.startedAt,
+      data: { ...timer.data, side: toSide, firstSide: next.firstSide },
+    });
+    writeSession(reissued || timer, next);
+    feedback({ mark: toSide === 'Left' ? '⬅️' : '➡️', soundName: 'pop' });
+    await refresh();
+  } catch (err) {
+    toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
+  }
+}
+
+export async function stopRunningTimer(id) {
+  const timer = timerById(id);
+  const type = timer ? typeOf(config(), timer.typeId) : null;
+  // Missing when the feed was started in another browser: the entry then gets
+  // the total and the side it began on, exactly as it did before sides existed.
+  const session = type && supportsSides(type) ? readSession(timer) : null;
+
+  try {
+    const extra = { userId: state.userId };
+    if (session) extra.data = finish(session);
+    const { event } = await api.stopTimer(id, extra);
+    if (session) clearSession(timer);
+    const finished = typeOf(config(), event.typeId);
     const mins = event.data?.duration ?? 0;
+    const split = session ? sidesLine(event.data) : '';
     feedback({ mark: '✅', soundName: 'success' });
     toast({
-      icon: type.emoji,
-      text: `<b>${esc(type.label)}</b> · ${mins} min`,
-      tone: type.tone,
+      icon: finished.emoji,
+      text: `<b>${esc(finished.label)}</b> · ${mins} min${split ? ` · ${esc(split)}` : ''}`,
+      tone: finished.tone,
       actions: [{ label: 'Details', run: () => openLogSheet({ event }) }],
     });
     await refresh();
@@ -339,6 +419,7 @@ export async function stopRunningTimer(id) {
     toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
   }
 }
+
 
 export async function cancelRunningTimer(id) {
   await api.cancelTimer(id);

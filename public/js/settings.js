@@ -4,7 +4,7 @@ import {
   state, config, settings, saveConfig, openSheet, closeSheet, toast, refresh, render,
   markUnlocked, lockProfile,
 } from './core.js';
-import { api } from './api.js';
+import { api, autoBackup } from './api.js';
 import * as sound from './sound.js';
 import { esc, uid, babyAge } from './util.js';
 import {
@@ -14,6 +14,8 @@ import {
 import {
   NUTRIENTS, MILK_KINDS, nutritionOn, milkById, milkEnabled, enabledMilks, milkSummary,
 } from './nutrition.js';
+import { supportsSides } from './feeding.js';
+import { customChartTypes, customChartOn, AGGREGATIONS } from './stats.js';
 
 /* ------------------------------------------------------------ tiny pickers */
 
@@ -591,6 +593,15 @@ function openFieldSheet(index) {
     <label class="field"><span class="lab">Unit (optional)</span>
       <input type="text" data-meta="unit" value="${esc(field.unit || '')}" placeholder="cc, °C, kg">
     </label>
+    <div data-agg-row class="${['number', 'duration'].includes(field.type) ? '' : 'hidden'}">
+      ${segField('On a chart, a day of these is', 'agg', field.agg || 'sum',
+        AGGREGATIONS.map((a) => ({ value: a.value, label: a.label })))}
+      <p class="small muted" style="margin:-6px 0 10px">
+        <b>Total</b> for something you are accumulating — millilitres, minutes.
+        <b>Latest</b> for something you are measuring: three weigh-ins added
+        together would say a 7 lb baby weighs 21 lb.
+      </p>
+    </div>
     <label class="field"><span class="lab">Options — one per line (choice / colour)</span>
       <textarea data-meta="options" placeholder="Left&#10;Right&#10;Both&#10;&#10;For colours: Mustard|#d9a520">${esc(optionText)}</textarea>
     </label>
@@ -605,10 +616,13 @@ function openFieldSheet(index) {
     wirePickers(sheet);
     // Two segmented rows share one value; keep them in sync.
     sheet.addEventListener('seg-change', (ev) => {
+      if (ev.detail.group === 'agg') return;
       const other = ev.detail.group === 'type' ? 'type2' : 'type';
       sheet.querySelector(`[data-meta="${other}"]`).value = ev.detail.value;
       sheet.querySelectorAll(`[data-seg="${other}"]`).forEach((b) =>
         b.setAttribute('aria-pressed', String(b.dataset.value === ev.detail.value)));
+      sheet.querySelector('[data-agg-row]').classList
+        .toggle('hidden', !['number', 'duration'].includes(ev.detail.value));
     });
 
     sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
@@ -630,6 +644,12 @@ function openFieldSheet(index) {
         unit: sheet.querySelector('[data-meta="unit"]').value.trim() || undefined,
         options: options.length ? options : undefined,
         showIf: sheet.querySelector('[data-meta="showIf"]').value.trim() || undefined,
+        // Only meaningful on a quantity, and `sum` is the default, so it is
+        // written only when it is neither.
+        agg: (['number', 'duration'].includes(type)
+          && sheet.querySelector('[data-meta="agg"]').value !== 'sum')
+          ? sheet.querySelector('[data-meta="agg"]').value
+          : undefined,
       };
       if (index >= 0) draft.fields[index] = next;
       else draft.fields.push(next);
@@ -958,8 +978,133 @@ export function renderSetup() {
         </p>
       </div>
 
+      ${autoBackupCard(cfg)}
+
       ${aboutCard()}
     </div>`;
+}
+
+/* ----------------------------------------------------------- auto-backup */
+
+const BACKUP_EVERY = [[24, 'Daily'], [24 * 7, 'Weekly']];
+const BACKUP_KEEP = [7, 14, 30];
+
+/** Defaults for a config saved before the block existed. */
+const backupCfg = (cfg) => ({
+  enabled: cfg.backup?.enabled === true,
+  everyHours: cfg.backup?.everyHours ?? 24,
+  keep: cfg.backup?.keep ?? 14,
+});
+
+/**
+ * Scheduled backups, written by the server rather than by this page.
+ *
+ * The card is the remote control; lib/autobackup.js does the work and answers
+ * for it. Where the copies go is deliberately not editable from here: a path on
+ * the server is not something a browser can browse, and `BT_BACKUP_DIR` belongs
+ * with the rest of the deployment rather than in a config a restore would carry
+ * onto a machine where it means nothing.
+ */
+function autoBackupCard(cfg) {
+  if (!autoBackup.available) return '';
+
+  const b = backupCfg(cfg);
+  const st = state.backup.status;
+  const folder = st?.folder || 'data/backups';
+  const last = st?.lastRunAt ? new Date(st.lastRunAt) : null;
+  const lastLine = st?.lastError
+    ? `<span style="color:var(--danger)">⚠️ ${esc(st.lastError)}</span>`
+    : last
+      ? `Last backup ${esc(last.toLocaleString())}${st.lastFile ? ` · <code>${esc(st.lastFile)}</code>` : ''}`
+      : 'No backup written yet.';
+
+  return `
+    <div class="section-title">Automatic backup</div>
+    <div class="card">
+      ${switchRow(
+        'Back up on its own',
+        b.enabled ? `Every ${b.everyHours >= 168 ? 'week' : 'day'} into ${folder}` : 'Off — nothing is written',
+        'backup.enabled',
+        b.enabled,
+      )}
+
+      ${b.enabled ? `
+        <p class="small muted">
+          The server checks every quarter of an hour and writes one when it is
+          due, whether or not anybody has this page open. It is the same file
+          <b>Download backup</b> produces, so either one restores anywhere.
+        </p>
+
+        <label class="field"><span class="lab">Folder</span>
+          <div class="list-item" style="margin:0">
+            <div style="font-size:1.4rem">${st?.usingFolder ? '🗂️' : '📁'}</div>
+            <div class="grow" style="min-width:0">
+              <b style="overflow-wrap:anywhere">${esc(folder)}</b>
+              <div class="small muted">${st?.usingFolder
+                ? 'From BT_BACKUP_DIR — a mount or a synced folder, so the copies leave this machine'
+                : 'The default, beside the data folder. Set BT_BACKUP_DIR to write somewhere that outlives this machine'}</div>
+            </div>
+          </div>
+        </label>
+
+        <label class="field"><span class="lab">How often</span>
+          <div class="seg">
+            ${BACKUP_EVERY.map(([hours, l]) => `
+              <button data-act="backup-every" data-value="${hours}" aria-pressed="${b.everyHours === hours}">${l}</button>`).join('')}
+          </div>
+        </label>
+
+        <label class="field"><span class="lab">Keep the newest</span>
+          <div class="seg">
+            ${BACKUP_KEEP.map((n) => `
+              <button data-act="backup-keep" data-value="${n}" aria-pressed="${b.keep === n}">${n}</button>`).join('')}
+          </div>
+        </label>
+        <p class="small muted">Older ones are deleted, and only files this app
+        wrote are ever touched — a folder you keep other things in is safe.</p>
+
+        <p class="small muted">${lastLine}</p>
+        <button class="btn wide" data-act="backup-run" ${state.backup.busy ? 'disabled' : ''}>
+          ${state.backup.busy ? 'Backing up…' : '🗜️ Back up now'}</button>
+      ` : ''}
+    </div>
+`;
+}
+
+/** Pull the server's status and redraw. Called on mount and after a change. */
+export async function refreshBackupStatus() {
+  if (!autoBackup.available) return;
+  state.backup.loaded = true;
+  try {
+    state.backup.status = await autoBackup.status();
+  } catch (err) {
+    state.backup.status = null;
+    console.warn('[backup status]', err.message);
+  }
+  render();
+}
+
+/** "Back up now", with the button showing that it is working. */
+export async function runBackupNow() {
+  state.backup.busy = true;
+  render();
+  try {
+    const st = await autoBackup.now();
+    state.backup.status = st;
+    if (st?.ok) {
+      sound.play('success');
+      toast({ icon: '🗜️', text: `Backed up to ${st.folder}`, tone: 'mint' });
+    } else {
+      sound.play('error');
+      toast({ icon: '⚠️', text: st?.lastError || 'Backup failed', tone: 'peach', ms: 7000 });
+    }
+  } catch (err) {
+    sound.play('error');
+    toast({ icon: '⚠️', text: err.message, tone: 'peach', ms: 7000 });
+  } finally {
+    state.backup.busy = false;
+    render();
+  }
 }
 
 /* ------------------------------------------------------------ statistics */
@@ -973,7 +1118,7 @@ export function renderSetup() {
  * here.
  */
 function statsCard(cfg) {
-  const on = trackedMetrics(cfg);
+  const on = { ...trackedMetrics(cfg), sides: activeTypes(cfg).some(supportsSides) };
   const want = cfg.stats?.charts || {};
   const rows = [
     { key: 'intake', label: 'Milk in', hint: 'cc per day from measured feeds', on: on.feeds, needs: 'a feed button' },
@@ -982,6 +1127,7 @@ function statsCard(cfg) {
     { key: 'sleep', label: 'Sleep', hint: 'Hours from timed sleeps', on: on.sleep, needs: 'the sleep button' },
     { key: 'pump', label: 'Pumped', hint: 'cc expressed per day', on: on.pump, needs: 'the pump button' },
     { key: 'clock', label: 'When feeds happen', hint: 'Every feed by hour of the day', on: on.feeds, needs: 'a feed button' },
+    { key: 'sides', label: 'Nursing by side', hint: 'Left against right, in minutes', on: on.sides, needs: 'a nursing button with a Left/Right choice' },
   ];
 
   return `
@@ -1001,6 +1147,54 @@ function statsCard(cfg) {
             <span class="txt"><b>${esc(r.label)}</b>
               <span class="small muted">Needs ${esc(r.needs)} under Tracked metrics</span></span>
           </label>`)).join('')}
+    </div>
+    ${customChartsCard(cfg)}`;
+}
+
+/**
+ * A chart for every button that has not got one written by hand.
+ *
+ * The rows come from each button's own fields, so a button invented this
+ * morning is listed here this morning. Buttons you made yourself arrive
+ * ticked; the ones that ship with the app arrive unticked, so nobody who never
+ * came to this screen finds it has grown three charts of bath times.
+ */
+function customChartsCard(cfg) {
+  const groups = customChartTypes(cfg);
+  if (!groups.length) return '';
+
+  return `
+    <div class="section-title">Charts from your own buttons</div>
+    <div class="card">
+      <p class="small muted" style="margin-top:0">
+        Every button that has no chart of its own can have one built from the
+        fields it records — a number is added up, a duration is totalled, a
+        yes/no is counted. Nothing here changes what is recorded.
+      </p>
+      ${groups.map(({ type, metrics }) => `
+        <div class="section-title" style="margin-left:0;font-size:0.8rem">${esc(type.emoji)} ${esc(type.label)}</div>
+        ${metrics.map((m) => switchRow(
+          // "Entries per day" rather than "How many <label> a day", which needs
+          // a plural this has no way to form: "How many bath a day".
+          m.kind === 'count' ? 'Entries per day' : m.label,
+          {
+            count: 'One column per day, counting every entry',
+            toggle: `How many entries had "${m.label}" ticked`,
+            duration: 'Minutes recorded, added up',
+            sum: `Added up${m.unit ? ` · ${m.unit}` : ''}`,
+          }[m.kind],
+          `stats.buttons.${type.id}.${m.key}`,
+          customChartOn(cfg, type, m.key),
+        )).join('')}
+        ${(type.fields || []).some((f) => f.type === 'select' || f.type === 'color') ? `
+          <p class="small muted" style="margin:2px 0 10px">
+            Its choice and colour fields are not in this list. Charting one means
+            a colour per option, and the chart palette here has two — stepped for
+            light and dark and checked for colour-vision deficiency — so those
+            stay in the entries and the CSV rather than being drawn in colours
+            nobody has checked.
+          </p>` : ''}
+      `).join('')}
     </div>`;
 }
 
@@ -1405,6 +1599,8 @@ function writeSetting(cfg, name, value) {
 
 /** Settings toggles/sliders are wired once, on the delegated container. */
 export function wireSetup(root) {
+  if (!state.backup.loaded) refreshBackupStatus();
+
   const list = root.querySelector('[data-reorder="types"]');
   if (list) {
     enableReorder(list, async (ids, focusId) => {
@@ -1424,6 +1620,11 @@ export function wireSetup(root) {
     el.addEventListener('change', () => {
       saveConfig((cfg) => writeSetting(cfg, el.dataset.setting, el.checked));
       if (el.dataset.setting === 'sound' && el.checked) sound.play('chime');
+      // Switching auto-backup on should write one straight away, so "is this
+      // working?" is answered on the screen that asked rather than tomorrow.
+      if (el.dataset.setting === 'backup.enabled') {
+        if (el.checked) runBackupNow(); else refreshBackupStatus();
+      }
     });
   });
   root.querySelectorAll('[data-setting-range]').forEach((el) => {

@@ -228,6 +228,7 @@ button { cursor: pointer; }
   font-size: 0.76rem;
 }
 .topbar.compact .chip.mini .avatar { font-size: 0.95rem; }
+.topbar.compact .chip.mini .name { max-width: var(--chip-name-max-compact, 9ch); }
 .topbar.compact .ctx-div { height: 18px; }
 
 .brand .logo, .brand-name, .chip.mini, .chip.mini .avatar {
@@ -257,8 +258,13 @@ button { cursor: pointer; }
   overflow-x: auto;
   padding: 2px 0;
   scrollbar-width: none;
+  /* A swipe along the chips must not turn into a back-navigation gesture or
+     scroll the page behind them once it hits the end. */
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .ctx-strip::-webkit-scrollbar { display: none; }
+
 .ctx-group { display: flex; align-items: center; gap: 6px; }
 .ctx-div {
   flex: 0 0 auto;
@@ -285,8 +291,25 @@ button { cursor: pointer; }
   border-color: var(--tone, var(--pink));
   background: color-mix(in srgb, var(--tone, var(--pink)) 22%, var(--surface));
 }
-.chip .avatar { font-size: 1.2rem; }
+.chip .avatar { flex: 0 0 auto; font-size: 1.2rem; }
 .chip .sub { font-weight: 600; font-size: 0.75rem; color: var(--muted); }
+
+/*
+ * A name is as wide as it needs to be, up to a ceiling, and then it ellipsizes.
+ *
+ * Without a ceiling one "Alexandria-Rose" makes a pill wider than the phone,
+ * pushes the person chips off the end of the strip, and - because the pill is
+ * a fixed-height rounded rectangle - spills its own text past the border it is
+ * supposed to sit inside. The whole name stays in `title` and `aria-label`, so
+ * nothing is lost by trimming what is drawn.
+ */
+.chip .name {
+  min-width: 0;
+  max-width: var(--chip-name-max, 11ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .chip.mini {
   gap: var(--sp-2);
@@ -320,6 +343,8 @@ button { cursor: pointer; }
 
 /* Baby hero summary */
 .hero { display: flex; align-items: center; gap: var(--sp-3); }
+.hero > .grow { min-width: 0; }
+.hero h2 { overflow-wrap: anywhere; }
 .hero .face {
   width: 62px; height: 62px; flex: 0 0 auto;
   display: grid; place-items: center;
@@ -411,7 +436,9 @@ button { cursor: pointer; }
 /* Running timer banner */
 .timer-card {
   --tone: var(--lavender);
-  display: flex; align-items: center; gap: 12px;
+  /* Wraps so the per-side panel can take a full row of its own underneath: at
+     390px it has nowhere near the room to sit beside the stop button. */
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
   background: linear-gradient(140deg, color-mix(in srgb, var(--tone) 30%, var(--surface)), var(--surface));
   border: 2px solid color-mix(in srgb, var(--tone) 50%, var(--surface));
   border-radius: var(--radius);
@@ -420,6 +447,37 @@ button { cursor: pointer; }
   box-shadow: var(--shadow-sm);
 }
 .timer-card .clock { font-size: 1.7rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+
+/*
+ * The two breasts, side by side under a running nursing timer.
+ *
+ * Both totals are always shown, including a zero: "Right 0:00" is the sentence
+ * "you have not been on this side yet", and a cell that appeared only once it
+ * had a number would make the panel jump the first time you switched. The one
+ * currently feeding is marked with a dot as well as a colour, so the split does
+ * not rely on colour alone.
+ */
+.timer-sides { flex: 1 0 100%; }
+.side-split { display: flex; gap: var(--sp-2); margin: 0 0 var(--sp-2); }
+.side-cell {
+  flex: 1 1 0; min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 5%, var(--surface));
+  border: 1px solid transparent;
+}
+.side-cell.live {
+  border-color: color-mix(in srgb, var(--tone, var(--pink)) 60%, var(--surface));
+  background: color-mix(in srgb, var(--tone, var(--pink)) 16%, var(--surface));
+}
+.side-cell .k { font-size: 0.68rem; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.side-cell .v { font-size: 1.05rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+
+/* The alternation hint, which is a suggestion and should not shout. */
+.pill.next-side {
+  background: color-mix(in srgb, var(--tone, var(--pink)) 26%, var(--surface));
+  font-weight: 700;
+}
 
 /* ------------------------------------------------------------------ history */
 
@@ -823,6 +881,9 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: var(--gap-row);
 }
 .list-item .grow { flex: 1; min-width: 0; }
+/* `min-width: 0` lets the column shrink; this is what lets the text inside it
+   actually break rather than run out past the card's edge. */
+.list-item .grow > b, .list-item .grow > .small { overflow-wrap: anywhere; }
 
 /* The reorder grip on Setup's tracked-metric rows. `touch-action: none` is what
    lets a finger drag the row rather than scroll the page under it, and the row
@@ -1055,5 +1116,7 @@ input:focus, select:focus, textarea:focus {
   .navbar .tabbar { flex: 0 1 auto; }
   /* auto margin (not justify-content) so an overflowing strip stays scrollable */
   .ctx-strip { flex: 0 1 auto; margin-left: auto; }
+  /* More room here than on a phone, so trim later. */
+  .ctx-strip { --chip-name-max: 16ch; --chip-name-max-compact: 13ch; }
   .tabbar button { flex-direction: row; gap: var(--sp-2); font-size: 0.85rem; }
 }
