@@ -37,6 +37,36 @@ export function niceMax(value) {
 }
 
 /**
+ * A padded, round [low, high] for a measure that does not start at zero.
+ *
+ * The zero-based rule that governs every column chart here is about *length*
+ * encoding magnitude: a truncated bar lies about the ratio between two bars. A
+ * line chart encodes with position instead, so it may - and for a growth curve
+ * must - leave zero out. A newborn going 3.4 to 4.6 kg is the whole story, and
+ * plotted from zero it is four flat marks near the top of the plot.
+ *
+ * The range is widened by a tenth on each side so the marks are not welded to
+ * the frame, then rounded outward to something a person would choose to write
+ * on an axis.
+ */
+export function niceRange(low, high) {
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return { lo: 0, hi: 1 };
+  // One reading, or several identical ones: invent a band around it rather than
+  // a zero-height plot, then round it like any other.
+  const pad = high === low
+    ? (Math.abs(high) * 0.1 || 1)
+    : (high - low) * 0.1;
+  const lo = low - pad;
+  const hi = high + pad;
+  // A step that is round at the range's own scale, then snap both ends to it.
+  const step = 10 ** Math.floor(Math.log10(hi - lo)) / 2;
+  return {
+    lo: Math.max(0, Math.round((Math.floor(lo / step) * step) * 1e6) / 1e6),
+    hi: Math.round((Math.ceil(hi / step) * step) * 1e6) / 1e6,
+  };
+}
+
+/**
  * How many gridlines. A count axis wants whole numbers on its ticks - 0/1/2/3
  * beats 0/0.75/1.5/2.25 every time - so an integer ceiling looks for a divisor
  * that gives one. Otherwise settle for a step that is round at the axis's own
@@ -74,6 +104,14 @@ function columnPath(x, y, w, h) {
   const r = Math.min(CAP, w / 2, h);
   if (h <= 0.5) return '';
   return `M${x} ${y + h}V${y + r}a${r} ${r} 0 0 1 ${r} -${r}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}V${y + h}Z`;
+}
+
+function axisFrom(lo, hi, w, h, count = 4) {
+  return Array.from({ length: count + 1 }, (_, i) => lo + ((hi - lo) / count) * i).map((t) => {
+    const y = PAD.top + h - ((t - lo) / (hi - lo)) * h;
+    return `<line class="viz-grid" x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${(PAD.left + w).toFixed(1)}" y2="${y.toFixed(1)}"></line>
+      <text class="viz-tick" x="${PAD.left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${esc(fmtTick(t))}</text>`;
+  }).join('');
 }
 
 function axis(max, w, h) {
@@ -124,7 +162,11 @@ export function columnChart({
     const barH = max ? (r.value / max) * h : 0;
     const y = PAD.top + h - barH;
     const tip = `${r.full || r.label}: ${r.value.toFixed(decimals)}${unit ? ` ${unit}` : ''}`;
-    const label = i === peak && r.value > 0
+    // The peak is direct-labelled, except when it *is* the ceiling: there the
+    // label would sit in the top padding, clipped and on top of the average
+    // line's own label. Nothing is lost - the top gridline already states the
+    // number. A yes/no counted per day hits this every time.
+    const label = i === peak && r.value > 0 && r.value < max
       ? `<text class="viz-value" x="${(x + barW / 2).toFixed(1)}" y="${(y - 5).toFixed(1)}" text-anchor="middle">${esc(r.value.toFixed(decimals))}</text>`
       : '';
     const tick = i % showEvery === 0
@@ -264,6 +306,69 @@ export function stackedColumnChart({
   }).join('');
 
   return frame(width, height, title, `${axis(max, w, h)}${marks}`);
+}
+
+/**
+ * A measured quantity over time: dots on a line, with a baseline that need not
+ * be zero.
+ *
+ * The one chart here that is not columns, and the reason is the encoding. A
+ * column says "this much", so its length has to start at zero or it lies about
+ * the ratio between two of them. A dot says "this high", so the axis is free to
+ * frame the part of the range the data actually occupies - which for a growth
+ * curve is the whole point, since 3.4 to 4.6 kg drawn from zero is four marks
+ * in a row near the top.
+ *
+ * `rows` may be sparse: a weekly weigh-in across daily buckets leaves most days
+ * empty, and those are gaps rather than zeros. The line joins the readings that
+ * exist and simply skips the rest, because a baby does not weigh nothing on the
+ * days nobody put her on the scales.
+ */
+export function lineChart({
+  rows, width = 640, height = 190, unit = '', title = '', decimals = 1, format = null,
+}) {
+  const points = rows.map((r, i) => ({ ...r, i })).filter((r) => r.value !== null && r.value !== undefined);
+  if (!points.length) return '';
+
+  const w = width - PAD.left - PAD.right;
+  const h = height - PAD.top - PAD.bottom;
+  const values = points.map((p) => p.value);
+  const { lo, hi } = niceRange(Math.min(...values), Math.max(...values));
+  const band = w / rows.length;
+  const at = (p) => ({
+    x: PAD.left + band * p.i + band / 2,
+    y: PAD.top + h - ((p.value - lo) / (hi - lo || 1)) * h,
+  });
+  const say = (v) => (format ? format(v) : `${v.toFixed(decimals)}${unit ? ` ${unit}` : ''}`);
+
+  const path = points.map((p, k) => {
+    const { x, y } = at(p);
+    return `${k ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+
+  const dots = points.map((p) => {
+    const { x, y } = at(p);
+    const tip = `${p.full || p.label}: ${say(p.value)}`;
+    return `<g class="viz-band" tabindex="0" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}">
+      <rect class="viz-hit" x="${(x - band / 2).toFixed(1)}" y="${PAD.top}" width="${band.toFixed(1)}" height="${h}"></rect>
+      <circle class="viz-dot-mark s1" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"></circle>
+    </g>`;
+  }).join('');
+
+  // The latest reading is the one worth naming: on a growth curve it is the
+  // number somebody is actually looking for.
+  const last = points[points.length - 1];
+  const lastAt = at(last);
+  const label = `<text class="viz-value" x="${Math.min(lastAt.x, PAD.left + w - 2).toFixed(1)}" y="${(lastAt.y - 8).toFixed(1)}"
+    text-anchor="${lastAt.x > PAD.left + w - 30 ? 'end' : 'middle'}">${esc(say(last.value))}</text>`;
+
+  const showEvery = Math.ceil(rows.length / 8);
+  const ticksRow = rows.map((r, i) => (i % showEvery === 0
+    ? `<text class="viz-tick" x="${(PAD.left + band * i + band / 2).toFixed(1)}" y="${height - 8}" text-anchor="middle">${esc(r.label)}</text>`
+    : '')).join('');
+
+  return frame(width, height, title, `${axisFrom(lo, hi, w, h)}
+    <path class="viz-line s1" d="${path}"></path>${dots}${label}${ticksRow}`);
 }
 
 /** Swatch + name pairs. Always drawn when a chart carries two or more series. */

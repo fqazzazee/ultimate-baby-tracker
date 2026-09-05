@@ -3,6 +3,60 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.11.0 — 2026-09-05
+
+### Growth
+
+- **A Growth button**: weight, length and head circumference, the three a
+  check-up records. It opens the form rather than logging on one tap — a
+  measurement is numbers you have to type, and a button that saved an empty one
+  would be worse than none. New `form` mode, available to any button you make.
+- **Measurements now draw as curves, not columns.** Anything summarised as
+  *Latest* or *Average* gets a line with a dot per reading and an axis that
+  frames the range instead of starting at zero. Bars have to start at zero
+  because their length is the comparison; a newborn going 3.4 to 5.3 kg drawn
+  that way is a flat line near the top of the plot. Days with no reading are
+  gaps, not zeros.
+- Weight and length are charted from the start. Head circumference is not — it
+  is a figure a doctor watches, not one to put on a home screen unasked.
+- Kilograms and centimetres, matching the references everyone compares against.
+  For pounds and ounces, set the unit to `lb` and give the field a smaller unit
+  of 16 — the pairing added in 1.10.0.
+
+### Medicines and vitamins
+
+- **The Medicine button now offers the usual ones** — vitamin D, iron, a
+  multivitamin, a probiotic, paracetamol, ibuprofen, simethicone, saline drops,
+  teething gel, an antibiotic — so the common one is a tap rather than eleven
+  letters typed one-handed. **Vitamin D** also gets its own preset.
+- **Names only.** There is not a dose, an age or a frequency anywhere in that
+  list and there will not be: what to give, how much and from what age comes
+  from the label and the pediatrician, and an app that pre-filled a number would
+  be making that decision for them. Listing something is not a recommendation to
+  give it.
+- **Choice fields are charted after all — one chart per option.** The old
+  objection was to putting every option on one chart, which needs a colour per
+  option where the palette has two. Counted separately there is no such problem.
+  Vitamin D is charted from the start: one column per day it was given, so a run
+  of missed days is a gap you can see.
+- **`Other…` on any choice field**, so a curated list never becomes a cage, and
+  a value that is not on the list any more stays readable on the entry that has
+  it.
+
+### Fixed
+
+- A column chart no longer draws its peak label when the peak *is* the axis
+  ceiling — it was clipped into the top padding and sat on top of the average
+  line's label. The top gridline already states the number. A yes/no counted per
+  day hit this every time.
+
+### Config
+
+- **Version 6.** The growth button, and the medicine field turned from free text
+  into a picker. Both additive, in `ensureGrowthAndMedicines()` beside
+  `ensureSideFields()`, so all three editions run the same one. A medicine field
+  somebody had already customised is left alone.
+
 ## 1.10.0 — 2026-09-05
 
 ### Charts from your own buttons

@@ -281,6 +281,10 @@ export async function quickLog(typeId, presetId) {
     return;
   }
 
+  // A measurement is numbers you have to type, so the button opens the form
+  // rather than saving an empty entry you then have to go and fix.
+  if (type.mode === 'form') return openLogSheet({ typeId, presetId: preset.id });
+
   if (type.mode === 'timer') {
     const running = runningTimer(typeId);
     if (running) return stopRunningTimer(running.id);

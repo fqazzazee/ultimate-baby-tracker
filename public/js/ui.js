@@ -151,6 +151,13 @@ function optionName(o) {
  * so adding a formula there adds it to the bottle picker with no migration.
  */
 export function resolveOptions(field, cfg, current = null) {
+  if (field.options && current && !field.optionsFrom) {
+    // A value typed through "Other", or one from a list since edited, stays on
+    // screen as its own chip - otherwise opening an old entry silently drops
+    // what it said.
+    const names = field.options.map((o) => (typeof o === 'string' ? o : o?.name));
+    if (!names.includes(current)) return [...field.options, current];
+  }
   if (field.optionsFrom === 'milks') {
     // A profile switched off in Setup stops being offered, but an entry that
     // already names it keeps its choice on screen - otherwise editing an old
@@ -190,8 +197,11 @@ export function fieldHTML(field, value, cfg = null) {
             return `<button type="button" class="btn sm" data-choose="${key}" data-value="${esc(name)}"
               aria-pressed="${name === cur}" style="${name === cur ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${lead}${esc(name)}</button>`;
           }).join('')}
+          ${field.allowOther ? `<button type="button" class="btn sm" data-other="${key}">✏️ Other…</button>` : ''}
           ${cur ? `<button type="button" class="btn sm" data-choose="${key}" data-value="">Clear</button>` : ''}
-        </div>`;
+        </div>
+        ${field.allowOther ? `<input type="text" class="hidden" data-otherbox="${key}"
+          placeholder="Type it instead" value="">` : ''}`;
       break;
     }
 
@@ -294,6 +304,24 @@ export function wireFieldControls(root, onChange = () => {}) {
       if (nameEl) nameEl.textContent = choose.dataset.value;
       applyShowIf(root);
       onChange();
+      return;
+    }
+
+    // "Other" reveals a text box that writes straight into the field, so a
+    // curated list never becomes a cage.
+    const other = ev.target.closest('[data-other]');
+    if (other) {
+      const key = other.dataset.other;
+      const box = root.querySelector(`[data-otherbox="${CSS.escape(key)}"]`);
+      if (box) {
+        box.classList.remove('hidden');
+        box.focus();
+        box.oninput = () => {
+          const input = root.querySelector(`[data-field="${CSS.escape(key)}"]`);
+          if (input) input.value = box.value;
+          onChange();
+        };
+      }
       return;
     }
 
