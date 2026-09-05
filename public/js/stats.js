@@ -12,11 +12,11 @@
 
 import { state, config, currentBaby } from './core.js';
 import { api } from './api.js';
-import { esc, fmtMinutes } from './util.js';
+import { esc, fmtMinutes, fmtCompound } from './util.js';
 import { trackedMetrics, activeTypes } from './ui.js';
 import { supportsSides } from './feeding.js';
 import {
-  columnChart, groupedColumnChart, legend, tableTwin, chartCard,
+  columnChart, groupedColumnChart, stackedColumnChart, legend, tableTwin, chartCard,
 } from './charts.js';
 import {
   nutritionOn, shownNutrients, nutrientsOf, milkTypeIds, referenceFor, tidy,
@@ -96,10 +96,20 @@ function bespokeTypeIds(cfg) {
  * out loud rather than leaving the omission to be noticed.
  */
 export function chartableMetrics(type) {
+  const fields = type.fields || [];
+  // A field that is another's smaller unit is not a measure of its own: ounces
+  // beside pounds are one weight, and charting them separately asks the reader
+  // to add 7 and 4.9 in their head and get 7.31.
+  const minors = new Set(fields.filter((f) => minorOf(f, fields)).map((f) => f.minor.key));
+
   const out = [{ key: 'count', label: 'How many', kind: 'count', unit: '', agg: 'count' }];
-  for (const f of type.fields || []) {
+  for (const f of fields) {
+    if (minors.has(f.key)) continue;
     if (f.type === 'number') {
-      out.push({ key: f.key, label: f.label, kind: 'number', unit: f.unit || '', agg: aggOf(f) });
+      out.push({
+        key: f.key, label: f.label, kind: 'number', unit: f.unit || '', agg: aggOf(f),
+        minor: minorOf(f, fields),
+      });
     } else if (f.type === 'duration') {
       out.push({ key: f.key, label: f.label, kind: 'duration', unit: 'min', agg: aggOf(f) });
     } else if (f.type === 'toggle') {
@@ -127,6 +137,35 @@ export const AGGREGATIONS = [
  */
 function aggOf(field) {
   return ['sum', 'avg', 'last'].includes(field.agg) ? field.agg : 'sum';
+}
+
+/**
+ * The field holding this one's smaller unit, when it names a real one.
+ *
+ * `{ minor: { key: 'weight_ounces', per: 16 } }` on a pounds field says the two
+ * are one quantity. Validated rather than trusted: a config naming a field that
+ * has since been deleted, or a nonsense `per`, falls back to the plain number
+ * instead of charting a NaN.
+ */
+function minorOf(field, fields) {
+  const m = field?.minor;
+  if (!m || !m.key) return null;
+  const target = (fields || []).find((f) => f.key === m.key && f.type === 'number');
+  const per = Number(m.per);
+  if (!target || !Number.isFinite(per) || per <= 0) return null;
+  return { key: m.key, unit: m.unit || target.unit || '', per };
+}
+
+/** One entry's value for a metric, with a smaller unit folded in if it has one. */
+function numberOf(metric, data) {
+  const major = Number(data[metric.key]);
+  if (!metric.minor) return Number.isFinite(major) ? major : null;
+  const minor = Number(data[metric.minor.key]);
+  const hasMajor = Number.isFinite(major);
+  const hasMinor = Number.isFinite(minor);
+  // "0 lb 12 oz" is a reading; both absent is not.
+  if (!hasMajor && !hasMinor) return null;
+  return (hasMajor ? major : 0) + (hasMinor ? minor : 0) / metric.minor.per;
 }
 
 /** typeId -> its chartable metrics, for the tally pass. */
@@ -280,8 +319,8 @@ function tallyCustom(metrics, bucket, event) {
     } else if (m.kind === 'toggle') {
       if (d[m.key]) cell.n += 1;
     } else {
-      const n = Number(d[m.key]);
-      if (!Number.isFinite(n)) continue;
+      const n = numberOf(m, d);
+      if (n === null) continue;
       cell.n += 1;
       cell.sum += n;
       // Entries arrive newest-first, so only an older one may overwrite.
@@ -904,6 +943,19 @@ export function combineCharts(cfg, type) {
 }
 
 /**
+ * Whether a combined pair is stacked into a total rather than set side by side.
+ *
+ * A second switch, not a mode of the first, because it is a second and stronger
+ * claim: side by side says these two are comparable, stacking says they add up
+ * to something worth reading off the axis. True of minutes in the pram and
+ * minutes carried, false of a morning and an evening temperature - and only the
+ * person who invented the fields knows which.
+ */
+export function stackCharts(cfg, type) {
+  return cfg?.stats?.stack?.[type.id] === true;
+}
+
+/**
  * What may share an axis, and in what order.
  *
  * Two metrics can share a chart only when they agree about *both* things a y-axis
@@ -958,6 +1010,17 @@ function summaryLine(type, m, hourly) {
  */
 const labelOf = (type, m) => (m.kind === 'count' ? type.label : m.label);
 
+/**
+ * A metric's value as a person reads it: compound where the field says so,
+ * a duration as "1h 20m", anything else as a rounded number.
+ */
+function readValue(m, value, { duration = false } = {}) {
+  if (!value) return duration || m.minor ? '—' : 0;
+  if (m.minor) return fmtCompound(value, m.unit, m.minor.unit, m.minor.per);
+  if (duration) return fmtMinutes(Math.round(value));
+  return Math.round(value * 100) / 100;
+}
+
 const cardId = (type, metrics) =>
   `viz-c-${type.id}-${metrics.map((m) => m.key).join('-')}`.replace(/[^a-zA-Z0-9-]/g, '-');
 
@@ -983,7 +1046,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
       width,
       unit,
       title: m.label,
-      decimals: asHours ? 1 : 0,
+      decimals: asHours || m.minor ? 1 : 0,
       avg: hourly ? null : (asHours ? mean / 60 : mean),
       avgDecimals: 1,
     }),
@@ -992,9 +1055,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
       rows: data,
       columns: [{
         label: duration ? 'Time' : (m.unit || 'Count'),
-        get: (r) => (duration
-          ? (r.value ? fmtMinutes(Math.round(r.value)) : '—')
-          : Math.round(r.value * 100) / 100),
+        get: (r) => readValue(m, r.value, { duration }),
       }],
     }),
   });
@@ -1013,7 +1074,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
  * No average line: it belongs to one series, and drawn across two it would
  * silently pick one and look like it described both.
  */
-function pairCard(cfg, type, pair, rows, avg, width, hourly) {
+function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
   const ids = pair.map((m) => `${type.id}.${m.key}`);
   const values = (r) => Object.fromEntries(
     pair.map((m, k) => [m.key, metricValue(m, r.custom[ids[k]])]),
@@ -1044,28 +1105,38 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly) {
     ? `${xLabel(hourly)}`
     : `${xLabel(hourly)}${pair[0].unit ? ` · ${pair[0].unit}` : ''}`;
 
+  const decimals = asHours || pair.some((m) => m.minor) ? 1 : 0;
+  const draw = stacked ? stackedColumnChart : groupedColumnChart;
+  const total = (r) => pair.reduce((a, m) => a + (r.values[m.key] || 0), 0);
+
   return chartCard({
     id: vizId,
-    title: `${type.emoji} ${pair.map((m) => labelOf(type, m)).join(' and ')} per ${xLabel(hourly)}`,
-    subtitle: `${how} ${tail}`,
+    title: `${type.emoji} ${pair.map((m) => labelOf(type, m)).join(stacked ? ' + ' : ' and ')} per ${xLabel(hourly)}`,
+    subtitle: `${how} ${tail}${stacked ? ' · the column is the total' : ''}`,
     legendHTML: legend(series),
-    svg: groupedColumnChart({
+    svg: draw({
       rows: data,
       series,
       width,
       unit,
       title: pair.map((m) => labelOf(type, m)).join(' and '),
-      decimals: asHours ? 1 : 0,
+      decimals,
     }),
+    // Stacked, the total is the thing the chart asserts, so the table states it
+    // rather than leaving the reader to add two columns back up.
     table: tableTwin({
       id: vizId,
       rows: raw,
-      columns: pair.map((m) => ({
-        label: `${labelOf(type, m)}${m.unit && !duration ? ` (${m.unit})` : ''}`,
-        get: (r) => (duration
-          ? (r.values[m.key] ? fmtMinutes(Math.round(r.values[m.key])) : '—')
-          : Math.round(r.values[m.key] * 100) / 100),
-      })),
+      columns: [
+        ...pair.map((m) => ({
+          label: `${labelOf(type, m)}${m.unit && !duration ? ` (${m.unit})` : ''}`,
+          get: (r) => readValue(m, r.values[m.key], { duration }),
+        })),
+        ...(stacked ? [{
+          label: 'Total',
+          get: (r) => readValue(pair[0], total(r), { duration }),
+        }] : []),
+      ],
     }),
   });
 }
@@ -1081,7 +1152,7 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly) {
 function customCharts(cfg, rows, avg, width, hourly) {
   const cards = customChartTypes(cfg).flatMap(({ type, metrics }) =>
     chartGroups(cfg, type, metrics).map((group) => (group.length > 1
-      ? pairCard(cfg, type, group, rows, avg, width, hourly)
+      ? pairCard(cfg, type, group, rows, avg, width, hourly, stackCharts(cfg, type))
       : singleCard(cfg, type, group[0], rows, avg, width, hourly))))
     .filter(Boolean).join('');
 

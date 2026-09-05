@@ -16,7 +16,8 @@ import {
 } from './nutrition.js';
 import { supportsSides } from './feeding.js';
 import {
-  customChartTypes, customChartOn, chartableMetrics, chartGroups, combineCharts, AGGREGATIONS,
+  customChartTypes, customChartOn, chartableMetrics, chartGroups, combineCharts, stackCharts,
+  AGGREGATIONS,
 } from './stats.js';
 
 /* ------------------------------------------------------------ tiny pickers */
@@ -581,6 +582,10 @@ function openFieldSheet(index) {
     ? structuredClone(draft.fields[index])
     : { key: '', label: '', type: 'number', unit: '', options: [] };
 
+  // Only another number field can be this one's smaller unit, and not itself.
+  const otherNumbers = (draft.fields || [])
+    .filter((f, i) => f.type === 'number' && i !== index && f.key !== field.key);
+
   const optionText = (field.options || [])
     .map((o) => (typeof o === 'string' ? o : `${o.name}${o.hex ? `|${o.hex}` : ''}`))
     .join('\n');
@@ -595,6 +600,23 @@ function openFieldSheet(index) {
     <label class="field"><span class="lab">Unit (optional)</span>
       <input type="text" data-meta="unit" value="${esc(field.unit || '')}" placeholder="cc, °C, kg">
     </label>
+    ${otherNumbers.length ? `
+    <div data-minor-row class="${field.type === 'number' ? '' : 'hidden'}">
+      ${segField('Second, smaller unit held in another field', 'minorKey', field.minor?.key || '', [
+        { value: '', label: 'None' },
+        ...otherNumbers.map((f) => ({ value: f.key, label: `${f.label}${f.unit ? ` (${f.unit})` : ''}` })),
+      ])}
+      <label class="field"><span class="lab">How many of it make one ${esc(field.unit || 'whole')}</span>
+        <input type="number" data-meta="minorPer" inputmode="numeric" min="2" step="1"
+               value="${esc(field.minor?.per ?? 16)}">
+      </label>
+      <p class="small muted" style="margin:-6px 0 10px">
+        For a quantity everyday use splits in two — pounds and ounces, feet and
+        inches. The two then count as <b>one</b> measurement: one chart, and
+        entries that read "7 lb 4.9 oz". The smaller field stops being offered
+        as a chart of its own, because on its own it is not one.
+      </p>
+    </div>` : ''}
     <div data-agg-row class="${['number', 'duration'].includes(field.type) ? '' : 'hidden'}">
       ${segField('On a chart, a day of these is', 'agg', field.agg || 'sum',
         AGGREGATIONS.map((a) => ({ value: a.value, label: a.label })))}
@@ -618,13 +640,15 @@ function openFieldSheet(index) {
     wirePickers(sheet);
     // Two segmented rows share one value; keep them in sync.
     sheet.addEventListener('seg-change', (ev) => {
-      if (ev.detail.group === 'agg') return;
+      if (ev.detail.group !== 'type' && ev.detail.group !== 'type2') return;
       const other = ev.detail.group === 'type' ? 'type2' : 'type';
       sheet.querySelector(`[data-meta="${other}"]`).value = ev.detail.value;
       sheet.querySelectorAll(`[data-seg="${other}"]`).forEach((b) =>
         b.setAttribute('aria-pressed', String(b.dataset.value === ev.detail.value)));
       sheet.querySelector('[data-agg-row]').classList
         .toggle('hidden', !['number', 'duration'].includes(ev.detail.value));
+      sheet.querySelector('[data-minor-row]')?.classList
+        .toggle('hidden', ev.detail.value !== 'number');
     });
 
     sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
@@ -652,12 +676,28 @@ function openFieldSheet(index) {
           && sheet.querySelector('[data-meta="agg"]').value !== 'sum')
           ? sheet.querySelector('[data-meta="agg"]').value
           : undefined,
+        minor: minorFromSheet(sheet, type),
       };
       if (index >= 0) draft.fields[index] = next;
       else draft.fields.push(next);
       openTypeSheet(draft.id);
     });
   });
+}
+
+/**
+ * The smaller-unit pairing as the field sheet has it, or undefined.
+ *
+ * The unit is copied from the field being pointed at rather than typed again,
+ * so the two can never disagree about what an ounce is called.
+ */
+function minorFromSheet(sheet, type) {
+  const picker = sheet.querySelector('[data-meta="minorKey"]');
+  if (type !== 'number' || !picker || !picker.value) return undefined;
+  const per = Number(sheet.querySelector('[data-meta="minorPer"]').value);
+  if (!Number.isFinite(per) || per <= 1) return undefined;
+  const target = (draft.fields || []).find((f) => f.key === picker.value);
+  return { key: picker.value, unit: target?.unit || '', per: Math.round(per) };
 }
 
 /** Preset editor: what one tap on this button should record. */
@@ -1221,6 +1261,15 @@ function customChartsCard(cfg) {
           `stats.combine.${type.id}`,
           combineCharts(cfg, type),
         ) : ''}
+        ${combineCharts(cfg, type) && chartGroups(cfg, type, chartableMetrics(type)).some((g) => g.length > 1)
+          ? switchRow(
+            'Stack them into a total',
+            stackCharts(cfg, type)
+              ? 'The column is the total, split into its parts'
+              : 'Side by side. Stack only if the two really add up to something',
+            `stats.stack.${type.id}`,
+            stackCharts(cfg, type),
+          ) : ''}
         ${(type.fields || []).some((f) => f.type === 'select' || f.type === 'color') ? `
           <p class="small muted" style="margin:2px 0 10px">
             Its choice and colour fields are not in this list. Charting one means

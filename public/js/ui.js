@@ -1,6 +1,6 @@
 /** Shared rendering helpers: tones, event summaries, and the field renderer. */
 
-import { esc, fmtMinutes } from './util.js';
+import { esc, fmtMinutes, fmtCompound } from './util.js';
 import { milkEnabled, milkTypeIds } from './nutrition.js';
 
 export const TONES = ['pink', 'sky', 'mint', 'lemon', 'lavender', 'peach'];
@@ -72,10 +72,30 @@ export function summarize(event, type) {
   const data = event.data || {};
   const parts = [];
   const diaperBits = [];
+  const fields = type.fields || [];
+  // A field that is another's smaller unit is printed with it, not after it:
+  // "7 lb 4.9 oz", never "7 lb · 4.9 oz".
+  const minors = new Set(
+    fields.filter((f) => f.minor?.key && Number(f.minor.per) > 0).map((f) => f.minor.key),
+  );
 
-  for (const field of type.fields || []) {
+  for (const field of fields) {
+    if (minors.has(field.key)) continue;
     const v = data[field.key];
-    if (v === undefined || v === null || v === '' || v === false) continue;
+    const minorValue = field.minor?.key ? data[field.minor.key] : undefined;
+    // The whole may be absent while the part is not - 0 lb 12 oz.
+    const empty = (x) => x === undefined || x === null || x === '' || x === false;
+    if (empty(v) && empty(minorValue)) continue;
+
+    if (field.type === 'number' && field.minor?.key && Number(field.minor.per) > 0) {
+      const whole = (Number(v) || 0) + (Number(minorValue) || 0) / Number(field.minor.per);
+      const unit = field.minor.unit
+        || fields.find((f) => f.key === field.minor.key)?.unit
+        || '';
+      parts.push(esc(fmtCompound(whole, field.unit || '', unit, Number(field.minor.per))));
+      continue;
+    }
+    if (empty(v)) continue;
 
     if (field.type === 'toggle') {
       diaperBits.push(field.label.replace(/\s*\(.*\)$/, ''));
