@@ -3,6 +3,82 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## Unreleased
+
+### Nursing, side by side
+
+- **A breastfeed timer now times each breast separately.** The running card
+  shows a clock per side with the one currently feeding ticking, and **Switch to
+  left/right** banks the side that was running and starts the other. The saved
+  entry carries `leftMin` and `rightMin` alongside the total, both editable
+  afterwards like any other field.
+- **The card says which side to start on next** — `next: right` beside the
+  button — by alternating from whichever side opened the last feed. Entries
+  record `firstSide`, so the suggestion follows what actually happened rather
+  than what was suggested.
+- Mid-feed segments are kept in the browser doing the feeding rather than sent
+  to the server on every switch, so a switch is instant and works with no
+  network. A feed started in one browser and stopped in another falls back to
+  what it recorded before per-side timing existed: a total and the side it began
+  on.
+- New chart, **Nursing by side**: left against right in minutes, with a headline
+  tile for nursing time a day and the share on the left.
+
+### Charts from buttons you made yourself
+
+- **Any button without a chart of its own now gets one built from its fields** —
+  a number added up, a duration totalled, a yes/no counted, and a plain count of
+  entries per day for every button. **Setup → Charts from your own buttons** has
+  a switch per metric. Buttons you invented arrive on; the ones that ship arrive
+  off, so nobody who never opened Setup finds three new charts of bath times.
+- **Fields can say how a day of them combines**: *Total*, *Average* or *Latest*,
+  in the field editor. Latest is what a measurement wants — left on Total, a
+  week of weigh-ins would add up and claim a 7 lb baby weighs 21 lb.
+- Choice and colour fields are deliberately not charted: one colour per option
+  would need a palette this app does not have, and inventing one would undo the
+  colour-vision checking the two existing series were chosen for. Setup says so
+  rather than leaving the omission to be noticed.
+
+### Automatic backup
+
+- **The server can now back itself up on a schedule**, off until you turn it on
+  in **Setup → Automatic backup**. It checks every quarter of an hour and writes
+  when due, whether or not anybody has the page open — no cron entry and no
+  systemd timer to add.
+- **`data/backups/` by default**, beside the journal it came from. Set
+  `BT_BACKUP_DIR` to a NAS mount, a synced folder or a removable disk and the
+  copies leave the machine on their own, which is the part that makes them a
+  backup rather than a second copy of a disk that can fail once.
+- Daily or weekly, keeping the newest 7, 14 or 30. Pruning goes by modification
+  time rather than filename — the name carries a UTC date and a local clock,
+  which is not monotonic in every timezone — and only ever touches files this
+  app wrote, so a folder with other things in it is safe.
+- The file is the same bundle **Download backup** produces, so either restores
+  anywhere. New: `GET /api/backup/auto` and `POST /api/backup/auto/run`.
+
+### Fixed
+
+- **A long baby name no longer breaks out of its chip.** One
+  "Wolfeschlegelsteinhausenbergerdorff" made a pill 335px wide on a 374px
+  screen, pushing the person chips off the end of the strip and spilling its own
+  text past the border it sits in. Names now ellipsize at a ceiling that widens
+  on a bigger screen, with the whole name still in the tooltip and the
+  accessible label.
+- **The chip strip keeps its scroll position.** The header is rewritten on every
+  render, including the background refresh every twenty seconds, which snapped
+  the strip back to the start mid-scroll. On a first paint it now opens on the
+  selected baby instead, which with several babies could otherwise be off the
+  right-hand edge with nothing saying so.
+- Long names wrap rather than widening the card on the Track hero and in Setup's
+  lists.
+
+### Config
+
+- **Version 5.** A timer button that records a Left/Right side gains `leftMin`
+  and `rightMin` fields. The step lives in `lib/defaults.js` as
+  `ensureSideFields()` rather than inside the migration, so it can be shared
+  with builds that cannot run `lib/store.js`.
+
 ## 1.6.0 — 2026-08-28
 
 ### Nutrition

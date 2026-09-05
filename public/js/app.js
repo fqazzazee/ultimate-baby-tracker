@@ -3,7 +3,7 @@
 import {
   state, config, currentBaby, currentUser, settings,
   refresh, render, setRenderer, saveConfig, toast, closeSheet, sheetOpen,
-  quickLog, openLogSheet, stopRunningTimer, cancelRunningTimer, applyTheme,
+  quickLog, openLogSheet, stopRunningTimer, cancelRunningTimer, switchFeedSide, applyTheme,
   isUnlocked, lockProfile, onRefresh,
 } from './core.js';
 import { api, subscribe } from './api.js';
@@ -20,7 +20,7 @@ import { wireTips } from './tips.js';
 import {
   renderSetup, wireSetup, exportCSV, downloadBackup, restoreBackup,
   openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet, openMilkSheet,
-  unlockProfile,
+  unlockProfile, runBackupNow,
 } from './settings.js';
 
 const TABS = [
@@ -40,7 +40,7 @@ function babyChips() {
     <button class="chip mini" style="${toneStyle(b.tone)}" data-act="pick-baby" data-id="${esc(b.id)}"
       aria-pressed="${b.id === state.babyId}" aria-label="Track ${esc(b.name)}"
       title="${esc(b.name)}${babyAge(b.birthDate) ? ` · ${esc(babyAge(b.birthDate))}` : ''}">
-      <span class="avatar">${esc(b.emoji || '👶')}</span><span>${esc(b.name)}</span>
+      <span class="avatar">${esc(b.emoji || '👶')}</span><span class="name">${esc(b.name)}</span>
     </button>`).join('');
 }
 
@@ -50,7 +50,7 @@ function userChips() {
     ${cfg.users.map((u) => `
       <button class="chip mini" style="${toneStyle(u.tone)}" data-act="pick-user" data-id="${esc(u.id)}"
         aria-pressed="${u.id === state.userId}" aria-label="Log as ${esc(u.name)}" title="Log as ${esc(u.name)}">
-        <span class="avatar">${esc(u.emoji)}</span><span>${esc(u.name)}</span>
+        <span class="avatar">${esc(u.emoji)}</span><span class="name">${esc(u.name)}</span>
         ${u.hasPin ? `<span class="lockmark">${isUnlocked(u.id) ? '🔓' : '🔒'}</span>` : ''}
       </button>`).join('')}
     ${currentUser().hasPin && isUnlocked(state.userId)
@@ -110,6 +110,7 @@ function brandRow() {
 function renderAll() {
   if (!state.data) return;
   const scrollY = window.scrollY;
+  const ctxScroll = $('.ctx-strip')?.scrollLeft ?? null;
   $('#chrome').innerHTML = `
     ${brandRow()}
     <div class="navbar">
@@ -120,7 +121,42 @@ function renderAll() {
   if (state.tab === 'setup') wireSetup($('#view'));
   measureHeader();
   window.scrollTo(0, scrollY);
+  restoreChipScroll(ctxScroll);
   tick();
+}
+
+/**
+ * Keep the chip strip where the reader left it, and open on the baby in use.
+ *
+ * The header is rewritten wholesale on every render - including the one the
+ * background refresh fires every twenty seconds - which resets the strip to
+ * `scrollLeft: 0`. With three babies that is its own small betrayal: you scroll
+ * across to reach Grandmother, the poll lands, and the strip snaps back under
+ * your thumb. The page's own scroll position is already preserved a few lines
+ * up for exactly this reason; the strip gets the same treatment.
+ *
+ * `null` means there was no strip to read - the first paint, or a baby was just
+ * added - and that is the one time the strip is positioned rather than
+ * restored: on the selected baby, which is otherwise off the right-hand edge
+ * with no indication that the app is pointed at it.
+ */
+function restoreChipScroll(previous) {
+  const strip = $('.ctx-strip');
+  if (!strip) return;
+  if (previous !== null) {
+    strip.scrollLeft = previous;
+    return;
+  }
+  const chip = strip.querySelector('[data-act="pick-baby"][aria-pressed="true"]');
+  if (!chip) return;
+  const box = strip.getBoundingClientRect();
+  const it = chip.getBoundingClientRect();
+  if (it.left >= box.left && it.right <= box.right) return;
+  // Nudge by the smallest amount that brings it fully inside, with a little
+  // air on the leading edge so it does not read as clipped.
+  strip.scrollLeft += (it.left < box.left)
+    ? it.left - box.left - 8
+    : it.right - box.right + 8;
 }
 
 /* ------------------------------------------------------------------ header */
@@ -347,6 +383,7 @@ const ACTIONS = {
   },
   'stop-timer': (el) => stopRunningTimer(el.dataset.id),
   'cancel-timer': (el) => cancelRunningTimer(el.dataset.id),
+  'switch-side': (el) => switchFeedSide(el.dataset.id, el.dataset.side),
 
   'filter-type': (el) => { state.historyType = el.dataset.type; render(); },
   range: async (el) => { state.historyDays = Number(el.dataset.days); await refresh(); },
@@ -360,6 +397,14 @@ const ACTIONS = {
   export: () => exportCSV(),
   backup: () => downloadBackup(),
   restore: () => restoreBackup(),
+
+  'backup-run': () => runBackupNow(),
+  'backup-every': (el) => saveConfig((cfg) => {
+    cfg.backup = { ...cfg.backup, everyHours: Number(el.dataset.value) };
+  }),
+  'backup-keep': (el) => saveConfig((cfg) => {
+    cfg.backup = { ...cfg.backup, keep: Number(el.dataset.value) };
+  }),
 
   'add-baby': () => openBabySheet(),
   'edit-baby': (el) => openBabySheet(el.dataset.id),

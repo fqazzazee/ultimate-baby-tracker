@@ -14,6 +14,9 @@ import {
   nutritionOn, shownNutrients, totalNutrients, fmtNutrient, isIntake,
   referenceFor, referenceLine, nutrientMeta, tidy, milkFor, milkTypeIds,
 } from './nutrition.js';
+import {
+  supportsSides, readSession, elapsed, nextSide, sidesLine, OTHER,
+} from './feeding.js';
 
 /* --------------------------------------------------------------- utilities */
 
@@ -345,23 +348,67 @@ export function openNutrientSheet(key) {
     </div>`);
 }
 
+/**
+ * The per-side panel under a running nursing timer.
+ *
+ * Each breast gets its own running total, and the one currently feeding ticks.
+ * It ticks by the same one-second sweep every other clock on the screen uses:
+ * `data-clock` renders "now minus this instant", so an instant placed as far
+ * back as the side's already-banked time makes the live figure come out as
+ * banked-plus-running with no second timer to keep in step.
+ */
+function sidePanel(timer, type) {
+  const session = readSession(timer);
+  // Started in another browser: there is nothing to split, and the card says
+  // which side is nursing and nothing it cannot stand behind.
+  if (!session) {
+    return timer.data?.side
+      ? `<div class="small muted">${esc(timer.data.side)} side</div>`
+      : '';
+  }
+
+  const now = Date.now();
+  const banked = elapsed(session, now);
+  const cell = (side) => {
+    const live = session.side === side;
+    const ms = side === 'Left' ? banked.leftMs : banked.rightMs;
+    const bankedOnly = side === 'Left' ? session.leftMs : session.rightMs;
+    // The live cell's origin walks backwards by whatever it has already banked.
+    const origin = new Date(new Date(session.sideStartedAt).getTime() - bankedOnly).toISOString();
+    return `
+      <div class="side-cell${live ? ' live' : ''}">
+        <div class="k">${side === 'Left' ? 'Left' : 'Right'}${live ? ' ●' : ''}</div>
+        <div class="v" ${live ? `data-clock="${esc(origin)}"` : ''}>${esc(fmtClock(ms))}</div>
+      </div>`;
+  };
+
+  const other = OTHER[session.side] || 'Right';
+  return `
+    <div class="side-split">${cell('Left')}${cell('Right')}</div>
+    <button class="btn sm wide" data-act="switch-side" data-id="${esc(timer.id)}" data-side="${esc(other)}">
+      ${other === 'Left' ? '⬅️' : '➡️'} Switch to ${esc(other.toLowerCase())}
+    </button>`;
+}
+
 function timerCards() {
   const timers = (state.data?.timers || []).filter((t) => t.babyId === state.babyId);
   if (!timers.length) return '';
   return timers.map((t) => {
     const type = typeOf(config(), t.typeId);
+    const sides = supportsSides(type);
     return `
       <div class="timer-card" style="${toneStyle(type.tone)}">
         <div style="font-size:1.8rem">${esc(type.emoji)}</div>
-        <div class="grow" style="flex:1">
+        <div class="grow" style="flex:1;min-width:0">
           <div style="font-weight:800">${esc(type.label)} running</div>
           <div class="clock" data-clock="${esc(t.startedAt)}">0:00</div>
-          <div class="small muted">started ${esc(fmtTime(t.startedAt))}${t.data?.side ? ` · ${esc(t.data.side)}` : ''}</div>
+          <div class="small muted">started ${esc(fmtTime(t.startedAt))}${!sides && t.data?.side ? ` · ${esc(t.data.side)}` : ''}</div>
         </div>
         <div style="display:grid;gap:6px">
           <button class="btn primary sm" data-act="stop-timer" data-id="${esc(t.id)}">Stop &amp; save</button>
           <button class="btn sm" data-act="cancel-timer" data-id="${esc(t.id)}">Discard</button>
         </div>
+        ${sides ? `<div class="timer-sides">${sidePanel(t, type)}</div>` : ''}
       </div>`;
   }).join('');
 }
@@ -398,6 +445,12 @@ function typeCard(type) {
       ? `${fmtAgo(last.at)}${summarize(last, type) ? ` · ${summarize(last, type)}` : ''}`
       : 'not logged yet';
 
+  // Alternation is the one thing about nursing nobody can hold in their head
+  // at 3am, so the card answers it before being asked.
+  const upNext = !running && supportsSides(type)
+    ? nextSide(eventsForBaby(), type.id)
+    : null;
+
   const buttons = running
     ? `<button class="tap running" data-act="stop-timer" data-id="${esc(running.id)}">
          <span class="ico">⏹️</span>Stop <span data-clock="${esc(running.startedAt)}">0:00</span>
@@ -412,7 +465,8 @@ function typeCard(type) {
       <div class="type-head">
         <div class="emoji">${esc(type.emoji)}</div>
         <div class="grow" style="flex:1;min-width:0">
-          <div class="label">${esc(type.label)}${type.mode === 'timer' ? ' <span class="pill">timer</span>' : ''}</div>
+          <div class="label">${esc(type.label)}${type.mode === 'timer' ? ' <span class="pill">timer</span>' : ''}${
+            upNext ? ` <span class="pill next-side">next: ${esc(upNext.toLowerCase())}</span>` : ''}</div>
           <div class="since">${sinceText}</div>
         </div>
       </div>
