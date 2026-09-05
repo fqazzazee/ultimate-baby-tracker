@@ -325,6 +325,12 @@ See [SECURITY.md](../SECURITY.md) for what a four-digit PIN is and is not.
   to confirm before **replacing everything currently stored**. A plain `.json`
   file works too, if you unzipped or hand-edited one.
 
+A bundle also carries a list of **deletions** — the id and time of every entry
+that was removed. It is what stops a restore quietly resurrecting entries you
+deleted on purpose, and it is the record any future reconciliation between two
+copies of a log would need. A backup written by an older release simply has no
+such list, and restores exactly as it always did.
+
 Two things worth knowing. The bundle contains the salted PIN hashes, so keep
 the file as private as the data folder itself. And before a restore overwrites
 anything, the current state is written to `data/pre-restore-<timestamp>.json`
@@ -378,8 +384,12 @@ data/
 
 `events.log` is a journal: new entries are appended, edits and deletions are
 appended as further lines, and the file is replayed at startup. A crash can
-never corrupt earlier entries, and the log is compacted automatically once
-tombstones pile up. Copying the folder is still the simplest backup there is.
+never corrupt earlier entries. Compaction rewrites it as one `add` per surviving
+entry plus one `del` per deletion — the deletions are kept, because "this entry
+is gone" is a fact and throwing it away is what makes a restore bring deleted
+entries back. A tombstone is an id and a timestamp, so a thousand of them is
+about sixty kilobytes and they are never pruned. Copying the folder is still the
+simplest backup there is.
 
 ## HTTP API
 

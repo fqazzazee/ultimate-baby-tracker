@@ -1768,6 +1768,9 @@ function openRestoreSheet(file, summary) {
     ['People', `${summary.users}${summary.pins ? ` (${summary.pins} with a PIN)` : ''}`],
     ['Buttons', summary.eventTypes],
     ['Alarms', summary.alarms],
+    // Only worth a row when there are any: a bundle written before deletions
+    // travelled carries none, and a zero would read as "this backup lost them".
+    ...(summary.deleted ? [['Deleted entries', `${summary.deleted} remembered as deleted`]] : []),
     ...(summary.milks ? [['Milk profiles', summary.milks]] : []),
   ];
 

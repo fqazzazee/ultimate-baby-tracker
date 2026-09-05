@@ -3,6 +3,28 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.11.1 — 2026-09-05
+
+### Fixed
+
+- **A deleted entry no longer comes back when a backup is restored.** Deletions
+  were recorded in the journal and then thrown away twice over: compaction
+  rewrote the log as one `add` per surviving entry, and a backup bundle had
+  nowhere to say that an entry had been removed. Restoring therefore resurrected
+  everything ever deleted.
+- The journal now keeps a **tombstone** — an id and the instant it was deleted —
+  through compaction, and a bundle carries them in a `deleted` list. A bundle
+  written by an older release has no such list and restores exactly as before,
+  so the backup format stays readable in both directions and its version does
+  not move. The restore sheet reports the count when there is one.
+- Tombstones are not pruned. A cutoff would be a promise that no copy of the log
+  has been out of touch for longer than the window, and nothing here can make
+  that promise. An id and a timestamp is about sixty bytes.
+
+This is a correctness fix on its own, and it is also the precondition for the
+two sides of the app ever reconciling their logs: without a record of what was
+deleted, a delete on one side is invisible to the other and the entry returns.
+
 ## 1.11.0 — 2026-09-05
 
 ### Growth
