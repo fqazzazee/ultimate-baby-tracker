@@ -17,6 +17,7 @@ import {
 import {
   supportsSides, readSession, elapsed, nextSide, sidesLine, OTHER,
 } from './feeding.js';
+import { unitSystem, displayUnit, toDisplay, decimalsFor, fmtQty, perWeight } from './units.js';
 
 /* --------------------------------------------------------------- utilities */
 
@@ -71,6 +72,7 @@ function heroCard() {
   if (!baby) return '';
   const cfg = config();
   const on = trackedMetrics(cfg);
+  const sys = unitSystem(cfg);
   const s = todayStats();
   const feedTypes = milkTypeIds(cfg);
   const lastFeed = eventsForBaby().find((e) => feedTypes.has(e.typeId));
@@ -84,7 +86,7 @@ function heroCard() {
   const tile = (value, label) => `<div class="stat"><div class="v">${value}</div><div class="k">${label}</div></div>`;
   const tiles = [
     on.feeds ? tile(s.feeds, 'Feeds') : '',
-    on.feeds ? tile(s.volume || '—', 'cc today') : '',
+    on.feeds ? tile(s.volume ? Number(toDisplay(s.volume, 'cc', sys).toFixed(decimalsFor('cc', sys, 0))) : '—', `${displayUnit('cc', sys)} today`) : '',
     on.diapers ? tile(s.wet, 'Wet') : '',
     on.diapers ? tile(s.poop, 'Poop') : '',
     on.sleep ? tile(s.sleepMin ? esc(fmtMinutes(s.sleepMin)) : '—', 'Sleep') : '',
@@ -222,10 +224,13 @@ function nutritionCard() {
   if (!counted && !eventsForBaby().some((e) => isIntake(cfg, e))) return '';
 
   const perDay = (v) => (days > 1 ? v / days : v);
-  const kcalPerKg = weight && totals.kcal ? `${(perDay(totals.kcal) / weight).toFixed(0)} kcal/kg` : '';
+  const sys = unitSystem(cfg);
+  const pw = perWeight(sys);
+  const vol = fmtQty(ml, 'cc', sys, 0);
+  const kcalPerKg = weight && totals.kcal ? `${(perDay(totals.kcal) / pw.of(weight)).toFixed(0)} kcal/${pw.unit}` : '';
   const sub = days > 1
-    ? `Daily average over ${days} days · ${ml} cc from ${counted} measured feed${counted === 1 ? '' : 's'}${kcalPerKg ? ` · ${esc(kcalPerKg)}` : ''}`
-    : `${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}${kcalPerKg ? ` · ${esc(kcalPerKg)}` : ''}`;
+    ? `Daily average over ${days} days · ${vol} from ${counted} measured feed${counted === 1 ? '' : 's'}${kcalPerKg ? ` · ${esc(kcalPerKg)}` : ''}`
+    : `${vol} over ${counted} measured feed${counted === 1 ? '' : 's'}${kcalPerKg ? ` · ${esc(kcalPerKg)}` : ''}`;
 
   if (!counted) {
     return shell('', `<p class="small muted" style="margin:10px 0 0">
@@ -297,8 +302,8 @@ export function openNutrientSheet(key) {
     <div class="card" style="margin:0 0 12px;text-align:center">
       <div style="font-size:2.1rem;font-weight:900;line-height:1.1">${esc(fmtNutrient(key, taken))}</div>
       <div class="small muted">${days > 1
-        ? `a day on average, from ${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'} in ${days} days`
-        : `from ${ml} cc over ${counted} measured feed${counted === 1 ? '' : 's'}`}</div>
+        ? `a day on average, from ${esc(fmtQty(ml, 'cc', unitSystem(cfg), 0))} over ${counted} measured feed${counted === 1 ? '' : 's'} in ${days} days`
+        : `from ${esc(fmtQty(ml, 'cc', unitSystem(cfg), 0))} over ${counted} measured feed${counted === 1 ? '' : 's'}`}</div>
       ${ref?.value !== null && ref?.value !== undefined ? `
         <div class="meter" role="img"
           aria-label="${esc(`${pct}% of the ${ref.kind || 'reference'} figure of ${tidy(ref.value)} ${meta.unit}`)}">
@@ -327,7 +332,7 @@ export function openNutrientSheet(key) {
       <label class="field"><span class="lab">Where it came from</span>
         ${sources.map(([name, v]) => `
           <div class="row" style="justify-content:space-between">
-            <span>${esc(v.emoji || '🍼')} ${esc(name)} <span class="muted small">${Math.round(v.ml)} cc${days > 1 ? '/day' : ''}</span></span>
+            <span>${esc(v.emoji || '🍼')} ${esc(name)} <span class="muted small">${esc(fmtQty(v.ml, 'cc', unitSystem(cfg), 0))}${days > 1 ? '/day' : ''}</span></span>
             <b>${esc(fmtNutrient(key, v.value))}</b>
           </div>`).join('')}
       </label>` : ''}
@@ -442,7 +447,7 @@ function typeCard(type) {
   const sinceText = running
     ? 'running now'
     : last
-      ? `${fmtAgo(last.at)}${summarize(last, type) ? ` · ${summarize(last, type)}` : ''}`
+      ? `${fmtAgo(last.at)}${summarize(last, type, config()) ? ` · ${summarize(last, type, config())}` : ''}`
       : 'not logged yet';
 
   // Alternation is the one thing about nursing nobody can hold in their head
@@ -534,7 +539,7 @@ function entryRow(e, cfg) {
   const user = userOf(cfg, e.userId);
   const baby = cfg.babies.find((b) => b.id === e.babyId);
   const alert = alertFor(e, type);
-  const detail = summarize(e, type);
+  const detail = summarize(e, type, cfg);
   return `
     <div class="entry" style="${toneStyle(type.tone)}" data-act="edit-event" data-id="${esc(e.id)}" role="button" tabindex="0">
       <div class="ico">${esc(type.emoji)}</div>
@@ -579,7 +584,7 @@ export function renderHistory() {
         return `
           <div class="day-head">
             <span>${esc(fmtDate(list[0].at))}</span>
-            <span class="muted small">${list.length} entries${dayTotal ? ` · ${dayTotal} cc` : ''}</span>
+            <span class="muted small">${list.length} entries${dayTotal ? ` · ${esc(fmtQty(dayTotal, 'cc', unitSystem(cfg), 0))}` : ''}</span>
           </div>
           ${list.map((e) => entryRow(e, cfg)).join('')}`;
       }).join('')

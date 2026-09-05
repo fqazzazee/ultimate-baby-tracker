@@ -3,6 +3,38 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.12.0 — 2026-09-05
+
+### Metric or US
+
+- **A Measurements switch**, in Setup → Look & feel. Millilitres become fluid
+  ounces, kilograms pounds, centimetres inches, °C becomes °F — across the
+  logging forms, History, the headline figures, and every chart, axis and table
+  twin. The per-body-weight figures follow: *cc/kg/day* becomes *fl oz/lb/day*,
+  and *kcal/kg* becomes *kcal/lb*.
+- **Nothing already logged changes.** A bottle recorded as 90 cc stays 90 cc;
+  only the notation changes, the way the clock setting turns 14:04 into 2:04 PM.
+  A toggle that rewrote stored numbers would be converting already-converted
+  values on its second flip, and one mistimed flip would multiply a month of
+  feeds by 29.6.
+- **A value you did not touch is stored exactly as it was.** 90 cc shows as
+  3 fl oz; opening that entry and saving it leaves 90 cc rather than the 88.7
+  that rounding through the displayed unit would give. Editing a number does
+  convert it back — typing 4 fl oz stores 118.294 cc.
+- **Grams, milligrams, micrograms and calories are not converted**, in either
+  system. They are what a nutrition panel is printed in on both sides of the
+  Atlantic; a US formula tin states protein in grams, and ounces would make the
+  figure unrecognisable against the tin it was copied from. Minutes are minutes,
+  and a unit you invent for your own field passes through untouched.
+- A field that declares its own smaller unit — pounds with ounces — keeps the
+  notation it was given. It has already said how it wants to be read.
+
+### Removed
+
+- `settings.volumeUnit`, which had been in the default config since the
+  beginning and was never read by anything. `settings.units` is the one that
+  does the job.
+
 ## 1.11.1 — 2026-09-05
 
 ### Fixed

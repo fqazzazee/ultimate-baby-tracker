@@ -374,6 +374,8 @@ const ACTIONS = {
     applyTheme(el.dataset.value);
   },
   'set-timefmt': (el) => saveConfig((cfg) => { cfg.settings.timeFormat = el.dataset.value; }),
+  /** Metric or US. A display choice: no stored value is touched. */
+  'set-units': (el) => saveConfig((cfg) => { cfg.settings.units = el.dataset.value; }),
 
   quick: (el) => quickLog(el.dataset.type, el.dataset.preset || null),
   details: (el) => openLogSheet({ typeId: el.dataset.type }),
