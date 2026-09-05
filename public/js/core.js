@@ -537,7 +537,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
         presetId: event?.presetId ?? presetId ?? null,
         at: fromLocalInput(sheet.querySelector('[data-meta="at"]').value),
         note: sheet.querySelector('[data-meta="note"]').value.trim(),
-        data: collectFields(sheet.querySelector('[data-fields]')),
+        data: collectFields(sheet.querySelector('[data-fields]'), cfg),
       };
       try {
         if (isNew) {

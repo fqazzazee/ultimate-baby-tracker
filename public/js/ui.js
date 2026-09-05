@@ -1,6 +1,10 @@
 /** Shared rendering helpers: tones, event summaries, and the field renderer. */
 
 import { esc, fmtMinutes, fmtCompound } from './util.js';
+import {
+  unitSystem, displayUnit, toDisplay, fromDisplay, roundCanonical, decimalsFor,
+  stepFor, fmtQty,
+} from './units.js';
 import { milkEnabled, milkTypeIds } from './nutrition.js';
 
 export const TONES = ['pink', 'sky', 'mint', 'lemon', 'lavender', 'peach'];
@@ -68,7 +72,7 @@ export function colorOption(field, value) {
  * Human sentence for one logged event's data, e.g. "60 cc · Formula" or
  * "Wet + poop · [swatch] Mustard". Returns HTML (values are escaped).
  */
-export function summarize(event, type) {
+export function summarize(event, type, cfg = null) {
   const data = event.data || {};
   const parts = [];
   const diaperBits = [];
@@ -116,7 +120,7 @@ export function summarize(event, type) {
       continue;
     }
     if (field.type === 'number') {
-      parts.push(`${abbr}${esc(v)}${field.unit ? ` ${esc(field.unit)}` : ''}`);
+      parts.push(`${abbr}${esc(fmtQty(v, field.unit, unitSystem(cfg), 2))}`);
       continue;
     }
     parts.push(esc(v));
@@ -233,15 +237,30 @@ export function fieldHTML(field, value, cfg = null) {
       break;
 
     case 'number': {
-      const step = field.step || 1;
+      const sys = unitSystem(cfg);
+      const step = stepFor(field.unit, sys, field.step || 1);
+      const dp = decimalsFor(field.unit, sys, 2);
+      const shown = value === undefined || value === null || value === ''
+        ? ''
+        : Number(toDisplay(value, field.unit, sys).toFixed(dp));
+      const bound = (v) => (v === undefined ? undefined : Number(toDisplay(v, field.unit, sys).toFixed(dp)));
+      /*
+       * `data-canonical` is what stops a round trip drifting. 30 cc shows as
+       * 1 fl oz; converting that back gives 29.57, so merely opening an entry
+       * and saving it would shave a little off every convertible number every
+       * time. collectFields compares what is in the box against what was put
+       * there, and when they match it returns the stored value untouched.
+       */
       body = `<div class="row">
           <button type="button" class="btn sm" data-bump="${key}" data-value="-${step}">−</button>
           <input type="number" data-field="${key}" data-kind="number" inputmode="decimal"
-                 ${field.min !== undefined ? `min="${field.min}"` : ''}
-                 ${field.max !== undefined ? `max="${field.max}"` : ''}
-                 step="${step}" value="${value ?? ''}">
+                 data-unit="${esc(field.unit || '')}" data-shown="${shown}"
+                 data-canonical="${value ?? ''}"
+                 ${field.min !== undefined ? `min="${bound(field.min)}"` : ''}
+                 ${field.max !== undefined ? `max="${bound(field.max)}"` : ''}
+                 step="${step}" value="${shown}">
           <button type="button" class="btn sm" data-bump="${key}" data-value="${step}">+</button>
-          ${field.unit ? `<span class="muted small">${esc(field.unit)}</span>` : ''}
+          ${field.unit ? `<span class="muted small">${esc(displayUnit(field.unit, sys))}</span>` : ''}
         </div>`;
       break;
     }
@@ -257,15 +276,32 @@ export function fieldsHTML(type, data = {}, cfg = null) {
   return (type.fields || []).map((f) => fieldHTML(f, data[f.key], cfg)).join('');
 }
 
-/** Read every [data-field] back into a plain object. */
-export function collectFields(root) {
+/**
+ * Read every [data-field] back into a plain object, in the units it is stored
+ * in.
+ *
+ * A number in a convertible unit was rendered converted, so it converts back -
+ * unless it is untouched, in which case the value that was stored is returned
+ * exactly. That guard is not a nicety: without it, opening an entry in US units
+ * and pressing Save would store 29.57 where 30 had been, and again on the next
+ * edit, and again.
+ */
+export function collectFields(root, cfg = null) {
+  const sys = unitSystem(cfg);
   const out = {};
   root.querySelectorAll('[data-field]').forEach((el) => {
     const key = el.dataset.field;
     if (el.dataset.kind === 'toggle') {
       if (el.checked) out[key] = true;
     } else if (el.dataset.kind === 'number') {
-      if (el.value !== '') out[key] = Number(el.value);
+      if (el.value === '') return;
+      const unit = el.dataset.unit || '';
+      const untouched = el.dataset.shown !== undefined && el.value === el.dataset.shown;
+      if (untouched && el.dataset.canonical !== '') {
+        out[key] = Number(el.dataset.canonical);
+      } else {
+        out[key] = roundCanonical(fromDisplay(el.value, unit, sys), unit, sys);
+      }
     } else if (el.value !== '') {
       out[key] = el.value;
     }

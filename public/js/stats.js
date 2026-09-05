@@ -13,6 +13,9 @@
 import { state, config, currentBaby } from './core.js';
 import { api } from './api.js';
 import { esc, fmtMinutes, fmtCompound } from './util.js';
+import {
+  unitSystem, displayUnit, toDisplay, decimalsFor, fmtQty, perWeight,
+} from './units.js';
 import { trackedMetrics, activeTypes } from './ui.js';
 import { supportsSides } from './feeding.js';
 import {
@@ -630,6 +633,10 @@ export function renderStats() {
   const avg = averages(rows, hourly, metricsByKey);
   const sum = totals(rows);
   const weight = Number(baby.weightKg) || 0;
+  const sys = unitSystem(cfg);
+  const perW = perWeight(sys);
+  const vol = displayUnit('cc', sys);
+  const volDp = decimalsFor('cc', sys, 0);
   const on = trackedMetrics(cfg);
   const charts = chartPrefs(cfg);
   const nutrition = nutritionOn(cfg) && on.feeds;
@@ -658,27 +665,27 @@ export function renderStats() {
 
       <div class="card">
         <div class="stat-grid kpi">
-          ${on.feeds ? statTile(`cc ${per}`, head.ml ? Math.round(head.ml) : '—', weight && head.ml ? `${(head.ml / weight).toFixed(0)} cc/kg` : '') : ''}
+          ${on.feeds ? statTile(`${vol} ${per}`, head.ml ? Number(toDisplay(head.ml, 'cc', sys).toFixed(volDp)) : '—', weight && head.ml ? `${(toDisplay(head.ml, 'cc', sys) / perW.of(weight)).toFixed(1)} ${vol}/${perW.unit}` : '') : ''}
           ${on.feeds ? statTile(`Feeds ${per}`, head.feeds ? head.feeds.toFixed(hourly ? 0 : 1) : '—', '') : ''}
           ${on.sleep ? statTile(`Sleep ${per}`, head.sleepMin ? fmtMinutes(Math.round(head.sleepMin)) : '—', head.longestSleep ? `best ${fmtMinutes(head.longestSleep)}` : '') : ''}
           ${on.diapers ? statTile(`Wet ${per}`, head.wet ? head.wet.toFixed(hourly ? 0 : 1) : '—', '') : ''}
           ${on.diapers ? statTile(`Dirty ${per}`, head.dirty ? head.dirty.toFixed(hourly ? 0 : 1) : '—', '') : ''}
-          ${on.pump ? statTile(`cc pumped ${per}`, head.pumpMl ? Math.round(head.pumpMl) : '—', '') : ''}
+          ${on.pump ? statTile(`${vol} pumped ${per}`, head.pumpMl ? Number(toDisplay(head.pumpMl, 'cc', sys).toFixed(volDp)) : '—', '') : ''}
           ${nursing ? statTile(`Nursing ${per}`, head.nursedMin ? fmtMinutes(Math.round(head.nursedMin)) : '—',
             head.nursedMin ? `${Math.round((head.leftMin / head.nursedMin) * 100)}% left` : '') : ''}
-          ${nutrition ? statTile(`kcal ${per}`, head.kcal ? Math.round(head.kcal) : '—', weight && head.kcal ? `${(head.kcal / weight).toFixed(0)} kcal/kg` : '') : ''}
+          ${nutrition ? statTile(`kcal ${per}`, head.kcal ? Math.round(head.kcal) : '—', weight && head.kcal ? `${(head.kcal / perW.of(weight)).toFixed(0)} kcal/${perW.unit}` : '') : ''}
         </div>
         <p class="small muted" style="margin:12px 0 0">
           ${esc(scope)}
-          ${weight ? `Per-kilo figures use ${esc(String(weight))} kg from ${esc(baby.name)}'s profile.` : 'Add a weight in Setup → Babies for per-kilo figures.'}
+          ${weight ? `Per-${perW.unit === 'lb' ? 'pound' : 'kilo'} figures use ${esc(fmtQty(weight, 'kg', sys, 2))} from ${esc(baby.name)}'s profile.` : `Add a weight in Setup → Babies for per-${perW.unit === 'lb' ? 'pound' : 'kilo'} figures.`}
         </p>
       </div>
 
-      ${on.feeds && charts.intake ? intakeChart(rows, avg, width, weight, hourly) : ''}
+      ${on.feeds && charts.intake ? intakeChart(rows, avg, width, weight, hourly, sys) : ''}
       ${on.feeds && charts.feeds ? feedCountChart(rows, avg, width, hourly) : ''}
       ${on.diapers && charts.diapers ? diaperChart(rows, width, hourly) : ''}
       ${on.sleep && charts.sleep ? sleepChart(rows, avg, width, hourly) : ''}
-      ${on.pump && charts.pump ? pumpChart(rows, avg, width, hourly) : ''}
+      ${on.pump && charts.pump ? pumpChart(rows, avg, width, hourly, sys) : ''}
       ${nursing && charts.sides ? sidesChart(rows, avg, width, hourly) : ''}
       ${nutrition ? nutrientCharts(cfg, rows, avg, width, baby, hourly) : ''}
       ${on.feeds && charts.clock && !hourly ? clockChart(cfg, state.stats.events, width) : ''}
@@ -739,14 +746,20 @@ function untrackedNote(on, charts) {
 
 const xLabel = (hourly) => (hourly ? 'hour' : 'day');
 
-function intakeChart(rows, avg, width, weight, hourly) {
-  const data = rows.map((r) => ({ ...r, value: r.values.ml }));
+function intakeChart(rows, avg, width, weight, hourly, sys) {
+  const vol = displayUnit('cc', sys);
+  const dp = decimalsFor('cc', sys, 0);
+  const perW = perWeight(sys);
+  const data = rows.map((r) => ({ ...r, value: toDisplay(r.values.ml, 'cc', sys) }));
   const missed = rows.reduce((a, r) => a + r.values.unmeasured, 0);
   return chartCard({
     id: 'viz-intake',
     title: `Milk in per ${xLabel(hourly)}`,
-    subtitle: `cc from bottles and measured feeds${!hourly && weight && avg.ml ? ` · ${(avg.ml / weight).toFixed(0)} cc/kg/day on average` : ''}`,
-    svg: columnChart({ rows: data, width, unit: 'cc', title: 'Milk in', avg: hourly ? null : avg.ml }),
+    subtitle: `${vol} from bottles and measured feeds${!hourly && weight && avg.ml ? ` · ${(toDisplay(avg.ml, 'cc', sys) / perW.of(weight)).toFixed(1)} ${vol}/${perW.unit}/day on average` : ''}`,
+    svg: columnChart({
+      rows: data, width, unit: vol, title: 'Milk in', decimals: dp,
+      avg: hourly ? null : toDisplay(avg.ml, 'cc', sys), avgDecimals: dp,
+    }),
     note: missed
       ? `${missed} feed${missed === 1 ? '' : 's'} in this range recorded no volume, so the real intake is higher than the bars.`
       : '',
@@ -754,7 +767,7 @@ function intakeChart(rows, avg, width, weight, hourly) {
       id: 'viz-intake',
       rows: data,
       columns: [
-        { label: 'cc', get: (r) => Math.round(r.values.ml) },
+        { label: vol, get: (r) => Number(toDisplay(r.values.ml, 'cc', sys).toFixed(dp)) },
         { label: 'Feeds', get: (r) => r.values.feeds },
       ],
     }),
@@ -846,8 +859,9 @@ function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
     const mean = avg.nutrients[n.key] || 0;
     const weight = Number(baby.weightKg) || 0;
 
+    const pw = perWeight(unitSystem(cfg));
     const perKg = n.key === 'kcal' && weight && mean
-      ? ` · ${(mean / weight).toFixed(0)} kcal/kg/day on average` : '';
+      ? ` · ${(mean / pw.of(weight)).toFixed(0)} kcal/${pw.unit}/day on average` : '';
 
     return chartCard({
       id: `viz-n-${n.key}`,
@@ -878,7 +892,7 @@ function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
   return `<div class="section-title">Nutrients</div>
     <p class="small muted" style="margin:-4px 4px 10px">
       Only feeds with a recorded volume can be counted — a nursing session you
-      timed but did not measure has no cc to scale. Choose which nutrients appear
+      timed but did not measure has no volume to scale. Choose which nutrients appear
       in Setup → Nutrition.
     </p>
     ${cards}`;
@@ -890,8 +904,10 @@ function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
  * Pumped milk is deliberately kept off the intake chart: the bottle it becomes
  * is logged separately, and adding both would count the same milk twice.
  */
-function pumpChart(rows, avg, width, hourly) {
-  const data = rows.map((r) => ({ ...r, value: r.values.pumpMl }));
+function pumpChart(rows, avg, width, hourly, sys) {
+  const vol = displayUnit('cc', sys);
+  const dp = decimalsFor('cc', sys, 0);
+  const data = rows.map((r) => ({ ...r, value: toDisplay(r.values.pumpMl, 'cc', sys) }));
   const sessions = rows.reduce((a, r) => a + r.values.pumps, 0);
   if (!sessions) return '';
   const blank = sessions - rows.reduce((a, r) => a + (r.values.pumpMl > 0 ? r.values.pumps : 0), 0);
@@ -899,9 +915,10 @@ function pumpChart(rows, avg, width, hourly) {
   return chartCard({
     id: 'viz-pump',
     title: `Pumped per ${xLabel(hourly)}`,
-    subtitle: 'cc expressed, from the amount on each pump entry',
+    subtitle: `${vol} expressed, from the amount on each pump entry`,
     svg: columnChart({
-      rows: data, width, unit: 'cc', title: 'Pumped', avg: hourly ? null : avg.pumpMl,
+      rows: data, width, unit: vol, title: 'Pumped', decimals: dp,
+      avg: hourly ? null : toDisplay(avg.pumpMl, 'cc', sys), avgDecimals: dp,
     }),
     note: blank
       ? 'Sessions logged without an amount leave no bar behind, so the real total is higher than this.'
@@ -910,7 +927,7 @@ function pumpChart(rows, avg, width, hourly) {
       id: 'viz-pump',
       rows: data,
       columns: [
-        { label: 'cc', get: (r) => Math.round(r.values.pumpMl) },
+        { label: vol, get: (r) => Number(toDisplay(r.values.pumpMl, 'cc', sys).toFixed(dp)) },
         { label: 'Sessions', get: (r) => r.values.pumps },
       ],
     }),
@@ -1055,12 +1072,21 @@ const labelOf = (type, m) => {
  * A metric's value as a person reads it: compound where the field says so,
  * a duration as "1h 20m", anything else as a rounded number.
  */
-function readValue(m, value, { duration = false } = {}) {
+function readValue(m, value, { duration = false, sys = 'metric' } = {}) {
   if (!value) return duration || m.minor ? '—' : 0;
+  // A field that declares its own smaller unit has already said how it wants
+  // to be read; the system toggle does not second-guess it.
   if (m.minor) return fmtCompound(value, m.unit, m.minor.unit, m.minor.per);
   if (duration) return fmtMinutes(Math.round(value));
-  return Math.round(value * 100) / 100;
+  const shown = toDisplay(value, m.unit, sys);
+  return Math.round(shown * 100) / 100;
 }
+
+/** A metric's unit as this system writes it, and how many decimals it wants. */
+const metricUnit = (m, sys) => (m.minor ? m.unit : displayUnit(m.unit, sys));
+const metricDp = (m, sys) => (m.minor ? 1 : decimalsFor(m.unit, sys, 0));
+/** A stored value in the unit the chart is drawn in. */
+const metricShown = (m, v, sys) => (m.minor ? v : toDisplay(v, m.unit, sys));
 
 const cardId = (type, metrics) =>
   `viz-c-${type.id}-${metrics.map((m) => m.key).join('-')}`.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -1079,6 +1105,7 @@ const isMeasured = (m) => m.agg === 'last' || m.agg === 'avg';
 
 /** One metric, one chart. The shape this screen had before combining existed. */
 function singleCard(cfg, type, m, rows, avg, width, hourly) {
+  const sys = unitSystem(cfg);
   const id = `${type.id}.${m.key}`;
   const data = rows.map((r) => ({ ...r, value: metricValue(m, r.custom[id]) }));
   if (!data.some((r) => r.value > 0)) return '';
@@ -1088,8 +1115,10 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
   const mean = avg.custom[id] || 0;
   const duration = m.kind === 'duration' && m.agg !== 'count';
   const asHours = asHoursScale([m], Math.max(...data.map((r) => r.value)));
-  const scaled = asHours ? data.map((r) => ({ ...r, value: r.value / 60 })) : data;
-  const unit = asHours ? 'h' : (m.kind === 'count' || m.kind === 'toggle' ? '' : m.unit);
+  const scaled = asHours
+    ? data.map((r) => ({ ...r, value: r.value / 60 }))
+    : data.map((r) => ({ ...r, value: metricShown(m, r.value, sys) }));
+  const unit = asHours ? 'h' : (m.kind === 'count' || m.kind === 'toggle' ? '' : metricUnit(m, sys));
   const vizId = cardId(type, [m]);
 
   return chartCard({
@@ -1101,16 +1130,16 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
       width,
       unit,
       title: m.label,
-      decimals: asHours || m.minor ? 1 : 0,
-      avg: hourly ? null : (asHours ? mean / 60 : mean),
+      decimals: asHours ? 1 : metricDp(m, sys),
+      avg: hourly ? null : (asHours ? mean / 60 : metricShown(m, mean, sys)),
       avgDecimals: 1,
     }),
     table: tableTwin({
       id: vizId,
       rows: data,
       columns: [{
-        label: duration ? 'Time' : (m.unit || 'Count'),
-        get: (r) => readValue(m, r.value, { duration }),
+        label: duration ? 'Time' : (metricUnit(m, sys) || 'Count'),
+        get: (r) => readValue(m, r.value, { duration, sys }),
       }],
     }),
   });
@@ -1125,15 +1154,23 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
  * line - and the axis frames the range the readings actually occupy.
  */
 function measuredCard(cfg, type, m, data, width, hourly) {
-  const points = data.map((r) => ({ ...r, value: r.value > 0 ? r.value : null }));
+  const sys = unitSystem(cfg);
+  const points = data.map((r) => ({
+    ...r, value: r.value > 0 ? metricShown(m, r.value, sys) : null,
+  }));
   const readings = points.filter((r) => r.value !== null).length;
   const duration = m.kind === 'duration';
-  const say = (v) => String(readValue(m, v, { duration }));
+  // The points are already in display units, so the formatter must not convert
+  // a second time - it is handed the shown value and only has to dress it.
+  const say = (v) => (m.minor
+    ? String(readValue(m, v, { duration }))
+    : `${Number(v.toFixed(metricDp(m, sys)))}${metricUnit(m, sys) ? ` ${metricUnit(m, sys)}` : ''}`);
   const vizId = cardId(type, [m]);
 
+  const shownUnit = metricUnit(m, sys);
   const what = m.agg === 'last'
-    ? `The last reading each ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`
-    : `The ${xLabel(hourly)}'s average${m.unit ? ` · ${m.unit}` : ''}`;
+    ? `The last reading each ${xLabel(hourly)}${shownUnit ? ` · ${shownUnit}` : ''}`
+    : `The ${xLabel(hourly)}'s average${shownUnit ? ` · ${shownUnit}` : ''}`;
 
   return chartCard({
     id: vizId,
@@ -1142,9 +1179,9 @@ function measuredCard(cfg, type, m, data, width, hourly) {
     svg: lineChart({
       rows: points,
       width,
-      unit: m.unit,
+      unit: shownUnit,
       title: labelOf(type, m),
-      decimals: m.minor ? 2 : 1,
+      decimals: m.minor ? 2 : Math.max(1, metricDp(m, sys)),
       format: (v) => say(v),
     }),
     note: readings < 2
@@ -1153,7 +1190,7 @@ function measuredCard(cfg, type, m, data, width, hourly) {
     table: tableTwin({
       id: vizId,
       rows: points.filter((r) => r.value !== null),
-      columns: [{ label: m.unit || 'Reading', get: (r) => say(r.value) }],
+      columns: [{ label: shownUnit || 'Reading', get: (r) => say(r.value) }],
     }),
   });
 }
@@ -1172,6 +1209,7 @@ function measuredCard(cfg, type, m, data, width, hourly) {
  * silently pick one and look like it described both.
  */
 function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
+  const sys = unitSystem(cfg);
   const ids = pair.map((m) => `${type.id}.${m.key}`);
   const values = (r) => Object.fromEntries(
     pair.map((m, k) => [m.key, metricValue(m, r.custom[ids[k]])]),
@@ -1181,15 +1219,16 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
 
   const peak = Math.max(...raw.flatMap((r) => pair.map((m) => r.values[m.key])));
   const asHours = asHoursScale(pair, peak);
-  const data = asHours
-    ? raw.map((r) => ({
-      ...r,
-      values: Object.fromEntries(pair.map((m) => [m.key, r.values[m.key] / 60])),
-    }))
-    : raw;
+  const data = raw.map((r) => ({
+    ...r,
+    values: Object.fromEntries(pair.map((m) => [
+      m.key,
+      asHours ? r.values[m.key] / 60 : metricShown(m, r.values[m.key], sys),
+    ])),
+  }));
 
   const duration = pair.every((m) => m.kind === 'duration' && m.agg !== 'count');
-  const unit = asHours ? 'h' : (pair[0].kind === 'count' || pair[0].kind === 'toggle' ? '' : pair[0].unit);
+  const unit = asHours ? 'h' : (pair[0].kind === 'count' || pair[0].kind === 'toggle' ? '' : metricUnit(pair[0], sys));
   const series = pair.map((m, k) => ({ key: m.key, label: labelOf(type, m), slot: `s${k + 1}` }));
   const vizId = cardId(type, pair);
 
@@ -1200,9 +1239,9 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
     : { sum: 'Added up over the', avg: "Average of the", last: 'The last one recorded each' }[pair[0].agg];
   const tail = pair[0].agg === 'count'
     ? `${xLabel(hourly)}`
-    : `${xLabel(hourly)}${pair[0].unit ? ` · ${pair[0].unit}` : ''}`;
+    : `${xLabel(hourly)}${metricUnit(pair[0], sys) ? ` · ${metricUnit(pair[0], sys)}` : ''}`;
 
-  const decimals = asHours || pair.some((m) => m.minor) ? 1 : 0;
+  const decimals = asHours || pair.some((m) => m.minor) ? 1 : metricDp(pair[0], sys);
   const draw = stacked ? stackedColumnChart : groupedColumnChart;
   const total = (r) => pair.reduce((a, m) => a + (r.values[m.key] || 0), 0);
 
@@ -1226,12 +1265,12 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
       rows: raw,
       columns: [
         ...pair.map((m) => ({
-          label: `${labelOf(type, m)}${m.unit && !duration ? ` (${m.unit})` : ''}`,
-          get: (r) => readValue(m, r.values[m.key], { duration }),
+          label: `${labelOf(type, m)}${metricUnit(m, sys) && !duration ? ` (${metricUnit(m, sys)})` : ''}`,
+          get: (r) => readValue(m, r.values[m.key], { duration, sys }),
         })),
         ...(stacked ? [{
           label: 'Total',
-          get: (r) => readValue(pair[0], total(r), { duration }),
+          get: (r) => readValue(pair[0], total(r), { duration, sys }),
         }] : []),
       ],
     }),

@@ -80,6 +80,33 @@ days is a gap you can see; any other item can have the same from Setup.
 > would be making that decision for them. Listing something is not a
 > recommendation to give it.
 
+## Metric or US
+
+**Setup → Look & feel → Measurements** switches the whole app between the two.
+Millilitres become fluid ounces, kilograms become pounds, centimetres become
+inches, and °C becomes °F — on the logging forms, in History, on the headline
+figures and through every chart and table, including the per-body-weight ones,
+which become *fl oz/lb* and *kcal/lb*.
+
+**Nothing already logged is changed by it.** A bottle recorded as 90 cc is 90 cc
+for ever; the toggle changes the notation it is written in, the way the clock
+setting changes 14:04 into 2:04 PM. That is the only safe version of this
+feature: a toggle that rewrote stored numbers would, on its second flip, be
+converting values it had already converted, and one mistimed flip would multiply
+a month of feeds by 29.6.
+
+So every value stays in the unit its field declares — millilitres, kilograms,
+centimetres, minutes — and is converted on the way to the screen and back again
+when you type. A number you did not touch is stored exactly as it was, rather
+than being rounded through the displayed unit: 90 cc shows as 3 fl oz, and
+opening that entry and saving it leaves 90 cc, not 88.7.
+
+Grams, milligrams, micrograms and calories are left alone in both systems. They
+are what a nutrition panel is printed in on either side of the Atlantic, and a
+US formula tin states protein in grams — turning that into ounces would make the
+number unrecognisable against the tin it was copied from. Minutes are minutes.
+A unit you invent for a field of your own is passed through untouched.
+
 ## Tracked metrics
 
 Nobody needs every card. **Setup → Tracked metrics** is a list of tick boxes,

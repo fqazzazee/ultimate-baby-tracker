@@ -8,6 +8,10 @@ import { api, autoBackup } from './api.js';
 import * as sound from './sound.js';
 import { esc, uid, babyAge } from './util.js';
 import {
+  UNIT_SYSTEMS, unitSystem, displayUnit, toDisplay, fromDisplay, roundCanonical,
+  decimalsFor, stepFor,
+} from './units.js';
+import {
   TONES, GENDER_TEMPLATES, BABY_EMOJI, PERSON_EMOJI, TYPE_EMOJI,
   toneStyle, activeTypes, trackedMetrics, typeOf, fieldsHTML, collectFields, wireFieldControls,
 } from './ui.js';
@@ -93,6 +97,12 @@ export function openBabySheet(babyId = null) {
   const baby = cfg.babies.find((b) => b.id === babyId) || {
     id: null, name: '', gender: 'surprise', birthDate: '', weightKg: '', emoji: '🐣', tone: 'mint',
   };
+  // The weight is stored in kilograms whatever the screen says; the same
+  // untouched-value guard the entry fields use keeps a save from shaving it.
+  const sys = unitSystem(cfg);
+  const weightShown = baby.weightKg === '' || baby.weightKg === null || baby.weightKg === undefined
+    ? ''
+    : Number(toDisplay(baby.weightKg, 'kg', sys).toFixed(decimalsFor('kg', sys, 2)));
 
   openSheet(`
     <h3>${baby.id ? 'Edit baby' : 'Add a baby'}</h3>
@@ -107,11 +117,14 @@ export function openBabySheet(babyId = null) {
     </label>
     <label class="field"><span class="lab">Current weight (optional)</span>
       <div class="row">
-        <input type="number" data-meta="weightKg" inputmode="decimal" min="0" max="40" step="0.05"
-               value="${esc(baby.weightKg ?? '')}" placeholder="e.g. 4.2">
-        <span class="muted small">kg</span>
+        <input type="number" data-meta="weightKg" inputmode="decimal"
+               min="0" max="${Number(toDisplay(40, 'kg', sys).toFixed(0))}"
+               step="${stepFor('kg', sys, 0.05)}"
+               data-shown="${weightShown}" data-canonical="${esc(baby.weightKg ?? '')}"
+               value="${weightShown}" placeholder="${sys === 'us' ? 'e.g. 9.3' : 'e.g. 4.2'}">
+        <span class="muted small">${esc(displayUnit('kg', sys))}</span>
       </div>
-      <span class="small muted">Used for the per-kilo intake figures a pediatrician asks about. Update it after each weigh-in.</span>
+      <span class="small muted">Used for the per-${esc(displayUnit('kg', sys) === 'lb' ? 'pound' : 'kilo')} intake figures a pediatrician asks about. Update it after each weigh-in.</span>
     </label>
     <label class="field"><span class="lab">Avatar</span>${emojiPicker('emoji', baby.emoji || '🐣', BABY_EMOJI)}</label>
     <label class="field"><span class="lab">Colour</span>${tonePicker(baby.tone || 'mint')}</label>
@@ -142,7 +155,12 @@ export function openBabySheet(babyId = null) {
         name,
         gender: sheet.querySelector('[data-meta="gender"]').value,
         birthDate: sheet.querySelector('[data-meta="birthDate"]').value,
-        weightKg: Number(sheet.querySelector('[data-meta="weightKg"]').value) || null,
+        weightKg: (() => {
+          const el = sheet.querySelector('[data-meta="weightKg"]');
+          if (!el.value) return null;
+          if (String(weightShown) === el.value && baby.weightKg) return Number(baby.weightKg);
+          return roundCanonical(fromDisplay(el.value, 'kg', sys), 'kg', sys) || null;
+        })(),
         emoji: sheet.querySelector('[data-meta="emoji"]').value || '👶',
         tone: sheet.querySelector('[data-meta="tone"]').value,
       };
@@ -732,7 +750,7 @@ function openPresetSheet(index) {
         id: preset.id || uid('p'),
         label,
         emoji: sheet.querySelector('[data-meta="emoji"]').value || draft.emoji,
-        data: collectFields(sheet.querySelector('[data-fields]')),
+        data: collectFields(sheet.querySelector('[data-fields]'), config()),
       };
       if (index >= 0) draft.presets[index] = next;
       else draft.presets.push(next);
@@ -990,6 +1008,17 @@ export function renderSetup() {
             ${[['auto', '🌗 Auto'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([v, l]) => `
               <button data-act="set-theme" data-value="${v}" aria-pressed="${(s.theme || 'auto') === v}">${l}</button>`).join('')}
           </div>
+        </label>
+        <label class="field"><span class="lab">Measurements</span>
+          <div class="seg">
+            ${UNIT_SYSTEMS.map((u) => `
+              <button data-act="set-units" data-value="${u.value}"
+                aria-pressed="${unitSystem(cfg) === u.value}">${esc(u.label)}</button>`).join('')}
+          </div>
+          <span class="small muted">${esc(UNIT_SYSTEMS.find((u) => u.value === unitSystem(cfg))?.hint || '')}
+          — how amounts are shown and typed. Nothing already logged is changed:
+          entries keep the numbers they were recorded with and are converted on
+          the way to the screen.</span>
         </label>
         <label class="field"><span class="lab">Clock</span>
           <div class="seg">
