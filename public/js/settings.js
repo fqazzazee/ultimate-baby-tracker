@@ -9,7 +9,7 @@ import * as sound from './sound.js';
 import { esc, uid, babyAge } from './util.js';
 import {
   UNIT_SYSTEMS, unitSystem, displayUnit, toDisplay, fromDisplay, roundCanonical,
-  decimalsFor, stepFor,
+  decimalsFor, stepFor, convertibleUnits, isBuiltinUnit, usNameFor,
 } from './units.js';
 import {
   TONES, GENDER_TEMPLATES, BABY_EMOJI, PERSON_EMOJI, TYPE_EMOJI,
@@ -618,7 +618,12 @@ function openFieldSheet(index) {
     ${segField('Kind', 'type', field.type, FIELD_KINDS.slice(0, 3))}
     ${segField('', 'type2', field.type, FIELD_KINDS.slice(3))}
     <label class="field"><span class="lab">Unit (optional)</span>
-      <input type="text" data-meta="unit" value="${esc(field.unit || '')}" placeholder="cc, °C, kg">
+      <input type="text" data-meta="unit" value="${esc(field.unit || '')}" placeholder="cc, °C, kg"
+             list="unit-choices" autocomplete="off">
+      <datalist id="unit-choices">
+        ${convertibleUnits().map((u) => `<option value="${esc(u.metric)}">${esc(u.us)} in US</option>`).join('')}
+      </datalist>
+      <span class="small muted" data-unit-note></span>
     </label>
     ${otherNumbers.length ? `
     <div data-minor-row class="${field.type === 'number' ? '' : 'hidden'}">
@@ -670,6 +675,22 @@ function openFieldSheet(index) {
       sheet.querySelector('[data-minor-row]')?.classList
         .toggle('hidden', ev.detail.value !== 'number');
     });
+
+    // Say, as it is typed, whether this unit will follow the Metric/US switch.
+    // The box stays free text - a unit nobody anticipated has to remain
+    // typeable - so the alternative is finding out from a chart later.
+    const unitBox = sheet.querySelector('[data-meta="unit"]');
+    const unitNote = sheet.querySelector('[data-unit-note]');
+    const sayUnit = () => {
+      const unit = unitBox.value.trim();
+      const other = unit ? usNameFor(unit) : null;
+      if (!unit) unitNote.textContent = 'No unit — the number is shown on its own.';
+      else if (other) unitNote.textContent = `Converts: shown as ${other} when Measurements is set to US.`;
+      else unitNote.textContent = `${unit} is shown as ${unit} in both systems. `
+        + 'Setup → Measurements can add a pair for it.';
+    };
+    unitBox.addEventListener('input', sayUnit);
+    sayUnit();
 
     sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
 
@@ -967,6 +988,8 @@ export function renderSetup() {
         </div>`).join('')}
       <button class="btn wide" data-act="add-user">➕ Add person</button>
 
+      ${measurementsCard(cfg)}
+
       <div class="section-title">Tracked metrics</div>
       <p class="small muted" style="margin:-4px 4px 10px">
         Tick what you want to keep track of. Unticking hides that card from the
@@ -1009,17 +1032,6 @@ export function renderSetup() {
               <button data-act="set-theme" data-value="${v}" aria-pressed="${(s.theme || 'auto') === v}">${l}</button>`).join('')}
           </div>
         </label>
-        <label class="field"><span class="lab">Measurements</span>
-          <div class="seg">
-            ${UNIT_SYSTEMS.map((u) => `
-              <button data-act="set-units" data-value="${u.value}"
-                aria-pressed="${unitSystem(cfg) === u.value}">${esc(u.label)}</button>`).join('')}
-          </div>
-          <span class="small muted">${esc(UNIT_SYSTEMS.find((u) => u.value === unitSystem(cfg))?.hint || '')}
-          — how amounts are shown and typed. Nothing already logged is changed:
-          entries keep the numbers they were recorded with and are converted on
-          the way to the screen.</span>
-        </label>
         <label class="field"><span class="lab">Clock</span>
           <div class="seg">
             ${[['12h', '2:04 PM'], ['24h', '14:04']].map(([v, l]) => `
@@ -1055,6 +1067,293 @@ export function renderSetup() {
 
       ${aboutCard()}
     </div>`;
+}
+
+/**
+ * Metric or US, in a section of its own rather than a row inside Look & feel.
+ *
+ * It began there, which is defensible - it changes nothing but presentation -
+ * and was wrong in practice. Setup has fourteen sections and Look & feel is the
+ * eleventh, so the one setting that governs every number on every other screen
+ * sat below four sub-lists of chart switches. It now sits above the things it
+ * governs, which is also where somebody looking for it goes first.
+ */
+function measurementsCard(cfg) {
+  const sys = unitSystem(cfg);
+  return `
+    <div class="section-title">Measurements</div>
+    <div class="card">
+      <div class="seg">
+        ${UNIT_SYSTEMS.map((u) => `
+          <button data-act="set-units" data-value="${u.value}"
+            aria-pressed="${sys === u.value}">${esc(u.label)}</button>`).join('')}
+      </div>
+      <p class="small muted" style="margin:10px 0 0">
+        <b>${esc(UNIT_SYSTEMS.find((u) => u.value === sys)?.hint || '')}</b> — how
+        every amount is shown and typed, here and on every other screen. There is
+        the same switch beside the range picker on <b>Stats</b>, for flipping a
+        chart while you are reading it.
+      </p>
+      <p class="small muted" style="margin:8px 0 0">
+        Nothing already logged is changed. Entries keep the numbers they were
+        recorded with and are converted on the way to the screen, so switching
+        back and forth is free and can never alter a figure.
+      </p>
+    </div>
+    ${unitPairsCard(cfg)}`;
+}
+
+/**
+ * The unit pairs the app knows, and the ones you can add.
+ *
+ * Five are built in because a baby tracker cannot ship without them. The rest
+ * are unguessable: whether a "Solids" button counts grams or millilitres, and
+ * whether a walk is logged in kilometres or steps, is a fact about the household
+ * rather than about babies. Declaring the pair here is what makes a field of
+ * your own follow the Metric/US switch everywhere - the entry form, the history
+ * line, the chart axis and its table - instead of standing still in one
+ * notation while everything around it flips.
+ */
+function unitPairsCard(cfg) {
+  const mine = Array.isArray(cfg.customUnits) ? cfg.customUnits : [];
+  const builtin = convertibleUnits().filter((u) => u.builtin);
+
+  return `
+    <div class="card">
+      <div class="section-title" style="margin:0 0 8px;font-size:0.8rem">Units that convert</div>
+      <p class="small muted" style="margin-top:0">
+        A number field converts when its unit is one of these. Any other unit is
+        shown exactly as it was typed, in both systems — which is right for
+        grams on a formula tin and for minutes, and wrong for a measure you
+        happen to think of in both.
+      </p>
+      <div class="preset-row" style="margin-bottom:10px">
+        ${builtin.map((u) => `<span class="btn sm" style="pointer-events:none">${esc(u.metric)} ⇄ ${esc(u.us)}</span>`).join('')}
+      </div>
+
+      ${mine.map((pair, i) => `
+        <div class="list-item">
+          <div style="font-size:1.4rem">📏</div>
+          <div class="grow">
+            <b>${esc(pair.metric || '—')} ⇄ ${esc(pair.us || '—')}</b>
+            <div class="small muted">${esc(pairLine(pair))}</div>
+          </div>
+          <button class="btn sm" data-act="edit-unit" data-index="${i}">Edit</button>
+        </div>`).join('')}
+
+      <button class="btn wide" data-act="add-unit">➕ Add a unit pair</button>
+      ${mine.length ? '' : `
+        <p class="small muted" style="margin:10px 0 0">
+          Nothing added yet. Grams and ounces for solids, kilometres and miles
+          for a walk, millilitres of medicine measured out in teaspoons — one
+          pair each, and every field using that unit follows the switch.
+        </p>`}
+    </div>`;
+}
+
+/** A number with no trailing zeros: 28.35, not 28.350000. */
+const tidyNum = (n) => String(Math.round(Number(n) * 1e6) / 1e6);
+
+/**
+ * One line saying what a stored pair does, including when the answer is
+ * nothing.
+ *
+ * The sheet refuses a pair that cannot work, so a broken one here arrived by
+ * hand-editing config.json or from a backup written by an older release. Either
+ * way it is sitting in a list of things that convert, looking as though it does;
+ * the row has to say otherwise or the next hour goes on wondering why the chart
+ * is still in grams.
+ */
+function pairLine(pair) {
+  if (!pair.metric || !pair.us) return 'Incomplete — this pair does not convert.';
+  if (isBuiltinUnit(pair.metric)) {
+    return `${pair.metric} is built in, so this is ignored — rename it or remove it.`;
+  }
+  const per = Number(pair.per);
+  if (!Number.isFinite(per) || per <= 0) {
+    return 'Needs a number above zero between the two — this pair does not convert.';
+  }
+  const offset = Number(pair.offset) || 0;
+  return `${tidyNum(per)} ${pair.metric} make one ${pair.us}`
+    + (offset ? `, then add ${tidyNum(offset)}` : '');
+}
+
+/**
+ * Common pairs, offered as a starting point.
+ *
+ * Not shipped as defaults - a config that arrived with eight unit pairs nobody
+ * asked for would be noise on the screen that lists them, and one of them would
+ * eventually be wrong for somebody. Offered here instead, so the arithmetic is
+ * a tap rather than a search, and every one stays editable afterwards.
+ */
+const UNIT_SUGGESTIONS = [
+  { label: 'g ⇄ oz', metric: 'g', us: 'oz', per: 28.349523125, metricDp: 0, usDp: 2 },
+  { label: 'kg ⇄ st', metric: 'kg', us: 'st', per: 6.35029318, metricDp: 2, usDp: 2 },
+  { label: 'm ⇄ ft', metric: 'm', us: 'ft', per: 0.3048, metricDp: 2, usDp: 1 },
+  { label: 'mm ⇄ in', metric: 'mm', us: 'in', per: 25.4, metricDp: 0, usDp: 2 },
+  { label: 'km ⇄ mi', metric: 'km', us: 'mi', per: 1.609344, metricDp: 2, usDp: 2 },
+  { label: 'ml ⇄ tsp', metric: 'mL', us: 'tsp', per: 4.92892159375, metricDp: 1, usDp: 2 },
+  { label: 'L ⇄ gal', metric: 'L', us: 'gal', per: 3.785411784, metricDp: 2, usDp: 2 },
+];
+
+/**
+ * Add or edit one pair. `index` of -1 appends.
+ *
+ * The metric side is the one every entry is stored in, and the sheet says so
+ * rather than leaving it to be inferred: choosing the wrong side would not
+ * corrupt anything, but it would mean typing in the unit you think of second.
+ */
+export function openUnitSheet(index) {
+  const cfg = config();
+  const list = Array.isArray(cfg.customUnits) ? cfg.customUnits : [];
+  // `|| {}` because the row that opened this may have gone: a config saved on
+  // another device arrives on a poll, and the tap that follows would otherwise
+  // read a property off undefined.
+  const pair = index >= 0
+    ? structuredClone(list[index] || {})
+    : { metric: '', us: '', per: '', offset: 0, metricDp: 1, usDp: 1 };
+
+  openSheet(`
+    <h3>${index >= 0 ? 'Edit unit pair' : 'Add a unit pair'}</h3>
+    ${index >= 0 ? '' : `
+      <div class="preset-row" style="margin-bottom:12px">
+        ${UNIT_SUGGESTIONS.map((s, i) => `
+          <button type="button" class="btn sm" data-suggest="${i}">${esc(s.label)}</button>`).join('')}
+      </div>`}
+
+    <label class="field"><span class="lab">Metric unit — the one entries are stored in</span>
+      <input type="text" data-meta="metric" value="${esc(pair.metric || '')}" placeholder="g" maxlength="12">
+    </label>
+    <label class="field"><span class="lab">US unit — how the same amount is written</span>
+      <input type="text" data-meta="us" value="${esc(pair.us || '')}" placeholder="oz" maxlength="12">
+    </label>
+    <label class="field"><span class="lab">How many of the metric unit make one of the US unit</span>
+      <input type="number" data-meta="per" inputmode="decimal" step="any" min="0"
+             value="${esc(pair.per ?? '')}" placeholder="28.349523125">
+    </label>
+    <p class="small muted" style="margin:-6px 0 12px">
+      28.35 grams make one ounce; 1.609 kilometres make one mile. Type the number
+      the way you would say it and the app divides in the right direction — both
+      ways come from this one figure, so they cannot disagree.
+    </p>
+
+    <div class="row" style="gap:10px">
+      <label class="field grow"><span class="lab">Decimals in metric</span>
+        <input type="number" data-meta="metricDp" inputmode="numeric" min="0" max="4" step="1"
+               value="${esc(pair.metricDp ?? 1)}">
+      </label>
+      <label class="field grow"><span class="lab">Decimals in US</span>
+        <input type="number" data-meta="usDp" inputmode="numeric" min="0" max="4" step="1"
+               value="${esc(pair.usDp ?? 1)}">
+      </label>
+    </div>
+    <p class="small muted" style="margin:-6px 0 12px">
+      How precisely each side is shown, and how big a step the − and + buttons
+      take. Grams are whole numbers; the ounces they become are not.
+    </p>
+
+    <label class="field"><span class="lab">Then add (optional)</span>
+      <input type="number" data-meta="offset" inputmode="decimal" step="any"
+             value="${esc(pair.offset ?? 0)}">
+    </label>
+    <p class="small muted" style="margin:-6px 0 12px">
+      Leave this at zero unless the two scales have different zeros — the one
+      case that exists is temperature, where you divide and <b>then add 32</b>.
+      Celsius and Fahrenheit are already built in, so you will almost certainly
+      never need this.
+    </p>
+
+    <div data-preview class="notice" style="margin-bottom:12px"></div>
+
+    <div class="sheet-actions">
+      ${index >= 0 ? '<button class="btn danger" data-remove type="button">Remove</button>' : ''}
+      <button class="btn" data-cancel type="button">Cancel</button>
+      <button class="btn primary" data-save type="button">Save</button>
+    </div>
+  `, (sheet) => {
+    const read = () => ({
+      metric: sheet.querySelector('[data-meta="metric"]').value.trim(),
+      us: sheet.querySelector('[data-meta="us"]').value.trim(),
+      per: Number(sheet.querySelector('[data-meta="per"]').value),
+      offset: Number(sheet.querySelector('[data-meta="offset"]').value) || 0,
+      metricDp: Number(sheet.querySelector('[data-meta="metricDp"]').value),
+      usDp: Number(sheet.querySelector('[data-meta="usDp"]').value),
+    });
+
+    // A worked example, updated as it is typed. The arithmetic here is small
+    // enough to get backwards without noticing, and one line reading "100 g is
+    // 3.53 oz" catches an inverted factor before it reaches a chart.
+    const preview = sheet.querySelector('[data-preview]');
+    const paint = () => {
+      const p = read();
+      if (!p.metric || !p.us || !Number.isFinite(p.per) || p.per <= 0) {
+        preview.innerHTML = 'Fill in both units and the number between them, and an example appears here.';
+        return;
+      }
+      const dp = Math.min(4, Math.max(0, Math.round(p.usDp) || 0));
+      const shown = (v) => Number((v / p.per + p.offset).toFixed(dp));
+      preview.innerHTML = `<b>Reads as</b> ${[1, 10, 100].map((v) =>
+        `${v} ${esc(p.metric)} = ${esc(String(shown(v)))} ${esc(p.us)}`).join(' · ')}`;
+    };
+
+    sheet.querySelectorAll('input').forEach((el) => el.addEventListener('input', paint));
+    sheet.querySelectorAll('[data-suggest]').forEach((b) => b.addEventListener('click', () => {
+      const s = UNIT_SUGGESTIONS[Number(b.dataset.suggest)];
+      for (const k of ['metric', 'us', 'per', 'metricDp', 'usDp']) {
+        sheet.querySelector(`[data-meta="${k}"]`).value = s[k];
+      }
+      sheet.querySelector('[data-meta="offset"]').value = 0;
+      paint();
+    }));
+    paint();
+
+    sheet.querySelector('[data-cancel]').addEventListener('click', closeSheet);
+    sheet.querySelector('[data-remove]')?.addEventListener('click', async () => {
+      closeSheet();
+      await saveConfig((next) => { (next.customUnits || []).splice(index, 1); });
+      // Fields keep the unit they were given; it simply stops converting. Say
+      // so, because the alternative reading - that the entries went with it -
+      // is the frightening one.
+      toast({ icon: '📏', text: 'Pair removed. Entries keep their numbers.', tone: 'sky' });
+    });
+
+    sheet.querySelector('[data-save]').addEventListener('click', async () => {
+      const p = read();
+      if (!p.metric || !p.us) {
+        return toast({ icon: '📏', text: 'Both units need a name', tone: 'peach' });
+      }
+      if (!Number.isFinite(p.per) || p.per <= 0) {
+        return toast({ icon: '📏', text: 'How many make one? Needs a number above zero', tone: 'peach' });
+      }
+      if (isBuiltinUnit(p.metric)) {
+        return toast({
+          icon: '📏',
+          text: `${esc(p.metric)} is built in already — pick another name`,
+          tone: 'peach',
+          ms: 6000,
+        });
+      }
+      const clash = (config().customUnits || []).findIndex(
+        (x, i) => i !== index && String(x.metric).toLowerCase() === p.metric.toLowerCase(),
+      );
+      if (clash >= 0) {
+        return toast({ icon: '📏', text: `${esc(p.metric)} already has a pair`, tone: 'peach' });
+      }
+
+      closeSheet();
+      await saveConfig((next) => {
+        if (!Array.isArray(next.customUnits)) next.customUnits = [];
+        if (index >= 0) next.customUnits[index] = p;
+        else next.customUnits.push(p);
+      });
+      sound.play('success');
+      return toast({
+        icon: '📏',
+        text: `<b>${esc(p.metric)}</b> now reads as ${esc(p.us)} in US`,
+        tone: 'mint',
+      });
+    });
+  });
 }
 
 /* ----------------------------------------------------------- auto-backup */
@@ -1193,12 +1492,15 @@ export async function runBackupNow() {
 function statsCard(cfg) {
   const on = { ...trackedMetrics(cfg), sides: activeTypes(cfg).some(supportsSides) };
   const want = cfg.stats?.charts || {};
+  // The volume charts are drawn in whichever notation is selected, so the rows
+  // that describe them say the same word the chart will.
+  const vol = displayUnit('cc', unitSystem(cfg));
   const rows = [
-    { key: 'intake', label: 'Milk in', hint: 'cc per day from measured feeds', on: on.feeds, needs: 'a feed button' },
+    { key: 'intake', label: 'Milk in', hint: `${vol} per day from measured feeds`, on: on.feeds, needs: 'a feed button' },
     { key: 'feeds', label: 'Feeds', hint: 'How often, measured or not', on: on.feeds, needs: 'a feed button' },
     { key: 'diapers', label: 'Diapers', hint: 'Wet and dirty side by side', on: on.diapers, needs: 'the diaper button' },
     { key: 'sleep', label: 'Sleep', hint: 'Hours from timed sleeps', on: on.sleep, needs: 'the sleep button' },
-    { key: 'pump', label: 'Pumped', hint: 'cc expressed per day', on: on.pump, needs: 'the pump button' },
+    { key: 'pump', label: 'Pumped', hint: `${vol} expressed per day`, on: on.pump, needs: 'the pump button' },
     { key: 'clock', label: 'When feeds happen', hint: 'Every feed by hour of the day', on: on.feeds, needs: 'a feed button' },
     { key: 'sides', label: 'Nursing by side', hint: 'Left against right, in minutes', on: on.sides, needs: 'a nursing button with a Left/Right choice' },
   ];
@@ -1259,6 +1561,30 @@ function combineHint(cfg, type) {
   return 'One chart each. Only measures in the same unit, summarised the same way, can share one';
 }
 
+/**
+ * What one chart switch will draw, in the unit and the summary it will use.
+ *
+ * Keyed off both halves of a metric, because both matter and neither implies
+ * the other: `kind` says what is being counted and `agg` says how a day of it
+ * becomes one number. An earlier version keyed off `kind` alone with a `sum`
+ * branch that no metric ever had, so every number field and every choice option
+ * on this screen described itself with an empty line.
+ */
+function metricHint(m, sys) {
+  if (m.kind === 'count') return 'One column per day, counting every entry';
+  if (m.kind === 'toggle') return `How many entries had "${m.label}" ticked`;
+  if (m.kind === 'option') return `How often "${m.option}" was the one chosen`;
+  // A minor unit is half of a compound reading - "7 lb 4.9 oz" - and is written
+  // by the field rather than converted, so it is quoted as the field wrote it.
+  const unit = m.minor ? m.unit : displayUnit(m.unit, sys);
+  const tail = unit ? ` · ${unit}` : '';
+  return {
+    sum: `Added up over the day${tail}`,
+    avg: `The day's average${tail}`,
+    last: `The last one recorded each day${tail}`,
+  }[m.agg] || `Charted per day${tail}`;
+}
+
 function customChartsCard(cfg) {
   const groups = customChartTypes(cfg);
   if (!groups.length) return '';
@@ -1277,12 +1603,7 @@ function customChartsCard(cfg) {
           // "Entries per day" rather than "How many <label> a day", which needs
           // a plural this has no way to form: "How many bath a day".
           m.kind === 'count' ? 'Entries per day' : m.label,
-          {
-            count: 'One column per day, counting every entry',
-            toggle: `How many entries had "${m.label}" ticked`,
-            duration: 'Minutes recorded, added up',
-            sum: `Added up${m.unit ? ` · ${m.unit}` : ''}`,
-          }[m.kind],
+          metricHint(m, unitSystem(cfg)),
           `stats.buttons.${type.id}.${m.key}`,
           customChartOn(cfg, type, m.key),
         )).join('')}

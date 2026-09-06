@@ -14,7 +14,7 @@ import { state, config, currentBaby } from './core.js';
 import { api } from './api.js';
 import { esc, fmtMinutes, fmtCompound } from './util.js';
 import {
-  unitSystem, displayUnit, toDisplay, decimalsFor, fmtQty, perWeight,
+  UNIT_SYSTEMS, unitSystem, displayUnit, toDisplay, decimalsFor, fmtQty, perWeight,
 } from './units.js';
 import { trackedMetrics, activeTypes } from './ui.js';
 import { supportsSides } from './feeding.js';
@@ -588,11 +588,24 @@ function statTile(label, value, hint) {
   </div>`;
 }
 
-function rangeRow(hourly) {
+/**
+ * The range picker, and beside it the unit system.
+ *
+ * The same setting as the one in Setup - one action, one config key - put where
+ * the numbers it governs actually are. Reading a chart is when you want the
+ * other notation, and going to Setup and back to get it loses your place.
+ */
+function rangeRow(hourly, cfg) {
+  const sys = unitSystem(cfg);
   return `<div class="viz-filter">
     <div class="seg">
       ${STATS_RANGES.map((d) => `
         <button data-act="stats-range" data-days="${d}" aria-pressed="${state.statsDays === d}">${d}d</button>`).join('')}
+    </div>
+    <div class="seg mini" role="group" aria-label="Measurement system">
+      ${UNIT_SYSTEMS.map((u) => `
+        <button data-act="set-units" data-value="${u.value}" aria-pressed="${sys === u.value}"
+          title="Show amounts in ${esc(u.hint)}">${esc(u.label)}</button>`).join('')}
     </div>
     <span class="small muted">${hourly
       ? 'Today, hour by hour. Every chart below covers it.'
@@ -611,14 +624,14 @@ export function renderStats() {
   const hourly = days === 1;
 
   if (state.stats.error) {
-    return `<div class="wrap">${rangeRow(hourly)}<div class="empty"><span class="big">⚠️</span>${esc(state.stats.error)}</div></div>`;
+    return `<div class="wrap">${rangeRow(hourly, cfg)}<div class="empty"><span class="big">⚠️</span>${esc(state.stats.error)}</div></div>`;
   }
   if (state.stats.loading) {
-    return `<div class="wrap">${rangeRow(hourly)}<div class="empty"><span class="big">📊</span>Reading the log…</div></div>`;
+    return `<div class="wrap">${rangeRow(hourly, cfg)}<div class="empty"><span class="big">📊</span>Reading the log…</div></div>`;
   }
   if (!state.stats.events.length) {
     return `<div class="wrap">
-      ${rangeRow(hourly)}
+      ${rangeRow(hourly, cfg)}
       <div class="empty"><span class="big">🧸</span>Nothing logged ${hourly ? 'today' : `in the last ${days} days`} yet.</div>
     </div>`;
   }
@@ -661,7 +674,7 @@ export function renderStats() {
   return `
     <div class="wrap">
       <div class="section-title">Statistics · ${esc(baby.name)}</div>
-      ${rangeRow(hourly)}
+      ${rangeRow(hourly, cfg)}
 
       <div class="card">
         <div class="stat-grid kpi">
@@ -691,7 +704,7 @@ export function renderStats() {
       ${on.feeds && charts.clock && !hourly ? clockChart(cfg, state.stats.events, width) : ''}
       ${customCharts(cfg, rows, avg, width, hourly)}
 
-      ${untrackedNote(on, charts)}
+      ${untrackedNote({ ...on, sides: nursing }, charts)}
 
       <div class="notice" style="border-color:color-mix(in srgb,var(--muted) 40%,transparent);background:var(--surface-2);color:var(--text)">
         <b>📋 What to bring to the appointment</b>
@@ -729,7 +742,10 @@ function untrackedNote(on, charts) {
   if (on.sleep && !charts.sleep) hidden.push('Sleep');
   if (on.pump && !charts.pump) hidden.push('Pumped');
   if (on.feeds && !charts.clock) hidden.push('When feeds happen');
-  if (!charts.sides) hidden.push('Nursing by side');
+  // Every other row here is guarded by whether the metric is tracked at all.
+  // Unguarded, this one told a household with no nursing button that a chart it
+  // could never have was switched off.
+  if (on.sides && !charts.sides) hidden.push('Nursing by side');
 
   return `
     ${off.length ? `<p class="small muted" style="margin:0 4px 8px">
@@ -1045,15 +1061,24 @@ function asHoursScale(metrics, peak) {
   return metrics.every((m) => m.kind === 'duration' && m.agg !== 'count') && peak >= 120;
 }
 
-/** The sentence under the title, saying which summary these columns are. */
-function summaryLine(type, m, hourly) {
+/**
+ * The sentence under the title, saying which summary these columns are.
+ *
+ * The unit is the one the chart is drawn in, not the one the value is stored
+ * in. Quoting `m.unit` raw put "· cc" under an axis labelled fl oz whenever
+ * Measurements was set to US, which reads as a bug in the conversion rather
+ * than in the caption.
+ */
+function summaryLine(type, m, hourly, sys) {
   if (m.kind === 'count') return `Every ${type.label.toLowerCase()} logged`;
   if (m.kind === 'option') return `How often "${m.option}" was the one given`;
   if (m.kind === 'toggle') return `How often "${m.label}" was ticked`;
+  const unit = metricUnit(m, sys);
+  const tail = unit ? ` · ${unit}` : '';
   return {
-    sum: `Added up over the ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
-    avg: `Average of the ${xLabel(hourly)}'s entries${m.unit ? ` · ${m.unit}` : ''}`,
-    last: `The last one recorded each ${xLabel(hourly)}${m.unit ? ` · ${m.unit}` : ''}`,
+    sum: `Added up over the ${xLabel(hourly)}${tail}`,
+    avg: `Average of the ${xLabel(hourly)}'s entries${tail}`,
+    last: `The last one recorded each ${xLabel(hourly)}${tail}`,
   }[m.agg];
 }
 
@@ -1107,8 +1132,14 @@ const isMeasured = (m) => m.agg === 'last' || m.agg === 'avg';
 function singleCard(cfg, type, m, rows, avg, width, hourly) {
   const sys = unitSystem(cfg);
   const id = `${type.id}.${m.key}`;
-  const data = rows.map((r) => ({ ...r, value: metricValue(m, r.custom[id]) }));
-  if (!data.some((r) => r.value > 0)) return '';
+  // `has` is whether anything was recorded that day, which is not the same
+  // question as whether the number came out above nought. A temperature of 0 °C
+  // and a fridge log of -3 are readings; testing the value instead threw the
+  // whole chart away for any field whose readings are not strictly positive.
+  const data = rows.map((r) => ({
+    ...r, value: metricValue(m, r.custom[id]), has: !!r.custom[id]?.n,
+  }));
+  if (!data.some((r) => r.has)) return '';
 
   if (isMeasured(m)) return measuredCard(cfg, type, m, data, width, hourly);
 
@@ -1124,7 +1155,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
   return chartCard({
     id: vizId,
     title: `${type.emoji} ${m.kind === 'count' ? type.label : m.label} per ${xLabel(hourly)}`,
-    subtitle: summaryLine(type, m, hourly),
+    subtitle: summaryLine(type, m, hourly, sys),
     svg: columnChart({
       rows: scaled,
       width,
@@ -1156,7 +1187,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
 function measuredCard(cfg, type, m, data, width, hourly) {
   const sys = unitSystem(cfg);
   const points = data.map((r) => ({
-    ...r, value: r.value > 0 ? metricShown(m, r.value, sys) : null,
+    ...r, value: r.has ? metricShown(m, r.value, sys) : null,
   }));
   const readings = points.filter((r) => r.value !== null).length;
   const duration = m.kind === 'duration';
@@ -1215,7 +1246,9 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
     pair.map((m, k) => [m.key, metricValue(m, r.custom[ids[k]])]),
   );
   const raw = rows.map((r) => ({ ...r, values: values(r) }));
-  if (!raw.some((r) => pair.some((m) => r.values[m.key] > 0))) return '';
+  // As in singleCard: presence is whether a value was recorded, not whether it
+  // landed above zero.
+  if (!raw.some((r) => pair.some((m, k) => r.custom[ids[k]]?.n))) return '';
 
   const peak = Math.max(...raw.flatMap((r) => pair.map((m) => r.values[m.key])));
   const asHours = asHoursScale(pair, peak);

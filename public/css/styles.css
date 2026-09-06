@@ -141,6 +141,11 @@ button { cursor: pointer; }
 .small { font-size: 0.82rem; }
 .row { display: flex; align-items: center; gap: var(--sp-3); }
 .row.wrap-row { flex-wrap: wrap; }
+/* The flex child that takes the slack. `.hero` and `.list-item` each declared
+   their own; two fields sharing a row want the same thing, so it is stated
+   once here for any flex row. */
+.row > .grow { flex: 1; min-width: 0; }
+.row > label.field { margin-bottom: 0; }
 .spacer { flex: 1; }
 .center { text-align: center; }
 .hidden { display: none !important; }
@@ -930,6 +935,10 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: var(--gap-card);
 }
 .viz-filter .seg { flex: 0 0 auto; }
+/* `.seg.mini` carries a top margin for the nutrition card, where it sits under
+   a heading. On the filter row it sits beside the range picker instead, and the
+   margin would drop it half a line below its neighbour. */
+.viz-filter .seg.mini { margin-top: 0; }
 
 .viz-card { padding: var(--sp-3); }
 .viz-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-2); }

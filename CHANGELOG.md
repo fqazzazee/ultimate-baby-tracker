@@ -7,11 +7,17 @@ and the version in `package.json` is what the header and the About card display.
 
 ### Metric or US
 
-- **A Measurements switch**, in Setup → Look & feel. Millilitres become fluid
-  ounces, kilograms pounds, centimetres inches, °C becomes °F — across the
+- **A Measurements switch**, in a Setup section of its own. Millilitres become
+  fluid ounces, kilograms pounds, centimetres inches, °C becomes °F — across the
   logging forms, History, the headline figures, and every chart, axis and table
   twin. The per-body-weight figures follow: *cc/kg/day* becomes *fl oz/lb/day*,
   and *kcal/kg* becomes *kcal/lb*.
+- **The same switch sits beside the range picker on Stats.** One setting and one
+  config key, put where the numbers it governs are: reading a chart is exactly
+  when you want the other notation, and walking to Setup and back to get it
+  loses your place. It began as a row inside *Look & feel*, which put the one
+  setting governing every number on every screen below four sub-lists of chart
+  switches.
 - **Nothing already logged changes.** A bottle recorded as 90 cc stays 90 cc;
   only the notation changes, the way the clock setting turns 14:04 into 2:04 PM.
   A toggle that rewrote stored numbers would be converting already-converted
@@ -28,6 +34,76 @@ and the version in `package.json` is what the header and the About card display.
   and a unit you invent for your own field passes through untouched.
 - A field that declares its own smaller unit — pounds with ounces — keeps the
   notation it was given. It has already said how it wants to be read.
+
+### Units of your own
+
+- **Setup → Measurements → Add a unit pair.** Five pairs are built in because a
+  baby tracker cannot ship without them; the rest are unguessable, since whether
+  a *Solids* button counts grams or millilitres is a fact about the household.
+  Declare the metric unit, the US unit and how many of the first make one of the
+  second, and every number field using that unit follows the Metric/US switch
+  everywhere the built-in ones do — the entry form and its stepper, the History
+  line, and the chart axis, subtitle and table on Stats.
+- **A chart of it comes free.** The generic chart builder already draws any
+  number field a button records; giving that field a declared unit is what makes
+  its axis, its caption and its table read in the notation the rest of the screen
+  is in, rather than standing still in one while everything around it flips.
+- Grams ⇄ ounces, kilograms ⇄ stone, metres ⇄ feet, millimetres ⇄ inches,
+  kilometres ⇄ miles, millilitres ⇄ teaspoons and litres ⇄ gallons are offered
+  as one-tap starting points rather than shipped as defaults — a config that
+  arrived with seven pairs nobody asked for would be noise, and one of them would
+  eventually be wrong for somebody. All stay editable afterwards.
+- **A worked example reads back as you type** — *1 g = 0.04 oz · 100 g =
+  3.53 oz* — which is what catches a conversion factor entered upside down before
+  it reaches a chart.
+- **The stored side is still the metric one, always.** Adding, editing or
+  deleting a pair changes notation and never a recorded number; a deleted pair
+  simply stops converting and the entries keep the figures they always had.
+  `cc`, `ml`, `kg`, `cm` and `°C` cannot be redefined, because the shipped
+  buttons store in them and shadowing one would silently rescale a whole history
+  on the way to the screen. A pair in the config that tries — only reachable by
+  hand-editing `config.json` — is ignored, and the row in Setup says so.
+- **The field editor says which it will be as you type.** The unit box stays free
+  text, because a unit nobody anticipated has to remain typeable, but it now
+  offers the ones that convert and says in a line underneath whether this one
+  will follow the switch.
+- `roundCanonical` derives its storage precision from the unit rather than
+  rounding everything to three decimals, which is what its own comment had
+  always claimed and what a declared pair with a finer metric side needs.
+
+### Fixed
+
+- **Chart switches for number fields and choice options had a blank
+  description.** Setup → *Charts from your own buttons* looked up its hint by the
+  metric's kind against a table whose only quantity branch was keyed `sum` — a
+  value no metric has ever had — so every number field and every choice option
+  on that screen described itself with an empty line. The hints now key off the
+  kind *and* the aggregation, and quote the unit as the chart will draw it.
+- **A chart subtitle quoted the stored unit while the axis beside it used the
+  shown one.** With Measurements on US, a custom button's chart read "Added up
+  over the day · cc" under an axis labelled *fl oz*, which looks like a broken
+  conversion rather than a caption.
+- **Readings of zero or below no longer vanish from their chart.** Presence was
+  tested as "the value came out above nought", so a temperature of 0 °C, or
+  anything genuinely negative, was treated as a day nobody measured — and a field
+  whose readings are never positive lost its chart entirely. Presence is now
+  whether an entry was recorded, which is the question that was meant.
+- **A line chart's axis may start below zero.** It was clamped at nought, so
+  negative readings were drawn outside the plot.
+- **Stats no longer says the "Nursing by side" chart is switched off** in
+  households with no nursing button. Every other row in that note is guarded by
+  whether the metric is tracked; this one was not.
+- **The − and + steppers no longer write 0.30000000000000004 into the box.** The
+  result is rounded to the step's own precision.
+- Setup → Statistics described the intake and pump charts in `cc` whatever the
+  Measurements switch said.
+- **The CSV export no longer files every amount under `amount_cc`.** That header
+  was true of the bottle and the pump and of nothing else: a button of your own
+  recording grams, or anything in a unit you declared, went into a column naming
+  a unit it was not in, and a spreadsheet has nowhere else to find out. The
+  column is now `amount`, with `amount_unit` beside it carrying whatever the
+  field declares. Both exporters changed together, so a CSV from the app and one
+  from the self-hosted edition still open the same way.
 
 ### Removed
 
