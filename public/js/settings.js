@@ -1206,8 +1206,11 @@ const UNIT_SUGGESTIONS = [
 export function openUnitSheet(index) {
   const cfg = config();
   const list = Array.isArray(cfg.customUnits) ? cfg.customUnits : [];
+  // `|| {}` because the row that opened this may have gone: a config saved on
+  // another device arrives on a poll, and the tap that follows would otherwise
+  // read a property off undefined.
   const pair = index >= 0
-    ? structuredClone(list[index])
+    ? structuredClone(list[index] || {})
     : { metric: '', us: '', per: '', offset: 0, metricDp: 1, usDp: 1 };
 
   openSheet(`
@@ -1325,7 +1328,7 @@ export function openUnitSheet(index) {
       if (isBuiltinUnit(p.metric)) {
         return toast({
           icon: '📏',
-          text: `${p.metric} is built in already — pick another name`,
+          text: `${esc(p.metric)} is built in already — pick another name`,
           tone: 'peach',
           ms: 6000,
         });
@@ -1334,7 +1337,7 @@ export function openUnitSheet(index) {
         (x, i) => i !== index && String(x.metric).toLowerCase() === p.metric.toLowerCase(),
       );
       if (clash >= 0) {
-        return toast({ icon: '📏', text: `${p.metric} already has a pair`, tone: 'peach' });
+        return toast({ icon: '📏', text: `${esc(p.metric)} already has a pair`, tone: 'peach' });
       }
 
       closeSheet();
@@ -1344,7 +1347,11 @@ export function openUnitSheet(index) {
         else next.customUnits.push(p);
       });
       sound.play('success');
-      return toast({ icon: '📏', text: `${p.metric} now reads as ${p.us} in US`, tone: 'mint' });
+      return toast({
+        icon: '📏',
+        text: `<b>${esc(p.metric)}</b> now reads as ${esc(p.us)} in US`,
+        tone: 'mint',
+      });
     });
   });
 }
