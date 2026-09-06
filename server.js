@@ -180,14 +180,26 @@ function exportCSV(url) {
   const typeLabel = (id) => config.eventTypes.find((t) => t.id === id)?.label || id || '';
   const babyId = url.searchParams.get('babyId') || 'all';
   const events = store.listEvents({ babyId, limit: 0 }).reverse();
-  const rows = [['when', 'baby', 'who', 'what', 'preset', 'amount_cc', 'duration_min', 'details', 'note']];
+  /**
+   * The unit the `amount` field of this button declares.
+   *
+   * The column used to be called `amount_cc`, which was true of the bottle and
+   * the pump and of nothing else. A button of your own recording grams, or a
+   * unit you declared in Setup, filed its numbers under a heading naming a unit
+   * they were not in - and a spreadsheet has no other place to find out.
+   */
+  const amountUnit = (typeId) => (config.eventTypes.find((t) => t.id === typeId)?.fields || [])
+    .find((f) => f.key === 'amount')?.unit || '';
+  const rows = [['when', 'baby', 'who', 'what', 'preset', 'amount', 'amount_unit', 'duration_min', 'details', 'note']];
   for (const e of events) {
     const d = e.data || {};
     const details = Object.entries(d)
       .filter(([k]) => k !== 'amount' && k !== 'duration')
       .map(([k, v]) => `${k}=${v}`)
       .join('; ');
-    rows.push([e.at, babyName(e.babyId), userName(e.userId), typeLabel(e.typeId), e.presetId || '', d.amount ?? '', d.duration ?? '', details, e.note || '']);
+    rows.push([e.at, babyName(e.babyId), userName(e.userId), typeLabel(e.typeId), e.presetId || '',
+      d.amount ?? '', d.amount === undefined ? '' : amountUnit(e.typeId),
+      d.duration ?? '', details, e.note || '']);
   }
   return toCSV(rows);
 }

@@ -97,6 +97,13 @@ and the version in `package.json` is what the header and the About card display.
   result is rounded to the step's own precision.
 - Setup → Statistics described the intake and pump charts in `cc` whatever the
   Measurements switch said.
+- **The CSV export no longer files every amount under `amount_cc`.** That header
+  was true of the bottle and the pump and of nothing else: a button of your own
+  recording grams, or anything in a unit you declared, went into a column naming
+  a unit it was not in, and a spreadsheet has nowhere else to find out. The
+  column is now `amount`, with `amount_unit` beside it carrying whatever the
+  field declares. Both exporters changed together, so a CSV from the app and one
+  from the self-hosted edition still open the same way.
 
 ### Removed
 
