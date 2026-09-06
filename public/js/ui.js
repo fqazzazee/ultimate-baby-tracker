@@ -238,7 +238,7 @@ export function fieldHTML(field, value, cfg = null) {
 
     case 'number': {
       const sys = unitSystem(cfg);
-      const step = stepFor(field.unit, sys, field.step || 1);
+      const step = stepFor(field.unit, sys, field.step);
       const dp = decimalsFor(field.unit, sys, 2);
       const shown = value === undefined || value === null || value === ''
         ? ''
@@ -309,11 +309,21 @@ export function collectFields(root, cfg = null) {
   return out;
 }
 
-/** Hide fields whose `showIf` dependency is currently falsy. */
+/**
+ * Hide fields whose `showIf` dependency is currently falsy.
+ *
+ * Only the toggles are read. A `showIf` names a yes/no field by construction,
+ * and running the whole of collectFields here would need the config to know
+ * which system the number boxes were rendered in - which this has no way to be
+ * handed, and would only ever use to compute values it then throws away.
+ */
 export function applyShowIf(root) {
-  const values = collectFields(root);
+  const ticked = new Set();
+  root.querySelectorAll('[data-kind="toggle"]').forEach((el) => {
+    if (el.checked) ticked.add(el.dataset.field);
+  });
   root.querySelectorAll('[data-showif]').forEach((el) => {
-    el.classList.toggle('hidden', !values[el.dataset.showif]);
+    el.classList.toggle('hidden', !ticked.has(el.dataset.showif));
   });
 }
 
@@ -365,8 +375,14 @@ export function wireFieldControls(root, onChange = () => {}) {
     if (bump) {
       const input = root.querySelector(`[data-field="${CSS.escape(bump.dataset.bump)}"]`);
       if (input) {
-        const next = (Number(input.value) || 0) + Number(bump.dataset.value);
-        input.value = String(Math.max(Number(input.min ?? 0) || 0, next));
+        const step = Number(bump.dataset.value);
+        const next = (Number(input.value) || 0) + step;
+        // Rounded to the step's own precision. Binary floating point turns
+        // 0.1 + 0.2 into 0.30000000000000004, and a stepper that writes that
+        // into the box looks broken however right the stored value is.
+        const dp = (String(Math.abs(step)).split('.')[1] || '').length;
+        const floor = input.min === '' ? 0 : Number(input.min);
+        input.value = String(Math.max(floor, Number(next.toFixed(dp))));
       }
       onChange();
       return;

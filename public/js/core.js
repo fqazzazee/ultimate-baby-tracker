@@ -8,6 +8,7 @@ import * as sound from './sound.js';
 import {
   $, esc, store, setTimeFormat, toLocalInput, fromLocalInput,
 } from './util.js';
+import { setCustomUnits } from './units.js';
 import {
   typeOf, userOf, babyOf, toneStyle, fieldsHTML, collectFields, wireFieldControls,
 } from './ui.js';
@@ -102,6 +103,11 @@ function applySettings() {
   const s = settings();
   sound.configure({ sound: s.sound !== false, volume: s.volume ?? 0.6 });
   setTimeFormat(s.timeFormat || '12h');
+  // Before anything renders, and on every refresh: a unit pair declared on one
+  // phone reaches this one the moment the config does, and one deleted stops
+  // converting at the same instant. See the header of units.js for why this is
+  // a registry rather than an argument.
+  setCustomUnits(config().customUnits);
   applyTheme(s.theme || 'auto');
 }
 

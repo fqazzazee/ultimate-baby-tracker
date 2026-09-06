@@ -60,8 +60,13 @@ export function niceRange(low, high) {
   const hi = high + pad;
   // A step that is round at the range's own scale, then snap both ends to it.
   const step = 10 ** Math.floor(Math.log10(hi - lo)) / 2;
+  const snapped = Math.round((Math.floor(lo / step) * step) * 1e6) / 1e6;
   return {
-    lo: Math.max(0, Math.round((Math.floor(lo / step) * step) * 1e6) / 1e6),
+    // Nought is a floor only for data that never goes below it - a weight or a
+    // length padded to -0.2 kg should still start the axis at zero. A reading
+    // that genuinely is negative, which a unit of somebody's own can easily be,
+    // needs the room: clamped, its marks would be drawn outside the plot.
+    lo: low < 0 ? snapped : Math.max(0, snapped),
     hi: Math.round((Math.ceil(hi / step) * step) * 1e6) / 1e6,
   };
 }

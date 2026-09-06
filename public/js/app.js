@@ -20,7 +20,7 @@ import { wireTips } from './tips.js';
 import {
   renderSetup, wireSetup, exportCSV, downloadBackup, restoreBackup,
   openBabySheet, openUserSheet, openTypeSheet, openAlarmSheet, openMilkSheet,
-  unlockProfile, runBackupNow,
+  openUnitSheet, unlockProfile, runBackupNow,
 } from './settings.js';
 
 const TABS = [
@@ -376,6 +376,8 @@ const ACTIONS = {
   'set-timefmt': (el) => saveConfig((cfg) => { cfg.settings.timeFormat = el.dataset.value; }),
   /** Metric or US. A display choice: no stored value is touched. */
   'set-units': (el) => saveConfig((cfg) => { cfg.settings.units = el.dataset.value; }),
+  'add-unit': () => openUnitSheet(-1),
+  'edit-unit': (el) => openUnitSheet(Number(el.dataset.index)),
 
   quick: (el) => quickLog(el.dataset.type, el.dataset.preset || null),
   details: (el) => openLogSheet({ typeId: el.dataset.type }),

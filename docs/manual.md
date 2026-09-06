@@ -82,7 +82,9 @@ days is a gap you can see; any other item can have the same from Setup.
 
 ## Metric or US
 
-**Setup → Look & feel → Measurements** switches the whole app between the two.
+**Setup → Measurements** switches the whole app between the two, and the same
+pair of buttons sits beside the range picker on **Stats** for flipping a chart
+while you are reading it.
 Millilitres become fluid ounces, kilograms become pounds, centimetres become
 inches, and °C becomes °F — on the logging forms, in History, on the headline
 figures and through every chart and table, including the per-body-weight ones,
@@ -101,11 +103,47 @@ when you type. A number you did not touch is stored exactly as it was, rather
 than being rounded through the displayed unit: 90 cc shows as 3 fl oz, and
 opening that entry and saving it leaves 90 cc, not 88.7.
 
-Grams, milligrams, micrograms and calories are left alone in both systems. They
-are what a nutrition panel is printed in on either side of the Atlantic, and a
-US formula tin states protein in grams — turning that into ounces would make the
-number unrecognisable against the tin it was copied from. Minutes are minutes.
-A unit you invent for a field of your own is passed through untouched.
+Grams, milligrams, micrograms and calories in the **nutrition panel** are left
+alone in both systems. They are what a panel is printed in on either side of the
+Atlantic, and a US formula tin states protein in grams — turning that into ounces
+would make the number unrecognisable against the tin it was copied from. Minutes
+are minutes.
+
+### Units of your own
+
+Five pairs are built in: `cc` and `ml` ⇄ *fl oz*, `kg` ⇄ *lb*, `cm` ⇄ *in*,
+`°C` ⇄ *°F*. Any other unit is shown exactly as it was typed, in both systems —
+until you declare a pair for it.
+
+**Setup → Measurements → Add a unit pair** takes four things:
+
+| | |
+|---|---|
+| **Metric unit** | what entries are stored in — `g` |
+| **US unit** | how the same amount is written — `oz` |
+| **How many make one** | `28.349523125` grams to the ounce |
+| **Decimals** | how precisely each side is shown, which also sets how big a step the − and + buttons take |
+
+Grams and ounces, kilometres and miles, millilitres and teaspoons are offered as
+one-tap starting points, and everything stays editable afterwards. A worked
+example under the form reads back as you type — *100 g = 3.53 oz* — which is
+what catches a factor entered upside down.
+
+From then on, every number field whose unit is `g` follows the Metric/US switch
+everywhere the built-in ones do: the entry form and its stepper, the History
+line, the headline figures, and the chart axis, subtitle and table on **Stats**.
+The field editor says which it will be as you type the unit in.
+
+**The same rule holds as for the built-ins: the metric side is what gets
+stored.** Declaring a pair, editing one, or deleting one changes notation and
+never a recorded number — a deleted pair simply stops converting, and the entries
+keep the figures they always had. `cc`, `ml`, `kg`, `cm` and `°C` cannot be
+redefined, because the buttons that ship with the app store in them and
+redefining one would silently rescale a whole history on the way to the screen.
+
+**Then add** is there for the one shape a factor alone cannot express — a scale
+whose zero sits somewhere else, as Fahrenheit's does. Celsius is already built
+in, so you will almost certainly never need it.
 
 ## Tracked metrics
 
@@ -309,7 +347,9 @@ Setup → Buttons → **New button** builds a tracked event from scratch:
 
 - **Fields** to record — number (with a unit like `cc` or `°C`), text, choice,
   yes/no, colour swatches, or duration. A field can be conditional on another,
-  so it only appears once a related yes/no field is ticked.
+  so it only appears once a related yes/no field is ticked. The unit box says as
+  you type whether that unit follows the Metric/US switch, and
+  [a pair of your own](#units-of-your-own) can be declared for one that does not.
 - **Buttons on the card** — each one is a preset that fills in some fields, so a
   single tap can mean "60 cc of formula" or "wet only". Leave a field blank to
   be asked later.
