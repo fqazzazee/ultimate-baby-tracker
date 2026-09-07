@@ -594,6 +594,10 @@ function statTile(label, value, hint) {
  * The same setting as the one in Setup - one action, one config key - put where
  * the numbers it governs actually are. Reading a chart is when you want the
  * other notation, and going to Setup and back to get it loses your place.
+ *
+ * Report sits here too rather than at the foot of the screen: it takes its own
+ * range and its own notation, so the row that sets those for the screen is
+ * where somebody looks for it.
  */
 function rangeRow(hourly, cfg) {
   const sys = unitSystem(cfg);
@@ -607,6 +611,7 @@ function rangeRow(hourly, cfg) {
         <button data-act="set-units" data-value="${u.value}" aria-pressed="${sys === u.value}"
           title="Show amounts in ${esc(u.hint)}">${esc(u.label)}</button>`).join('')}
     </div>
+    <button class="btn sm" data-act="report" title="Build a printable report from these charts">📋 Report</button>
     <span class="small muted">${hourly
       ? 'Today, hour by hour. Every chart below covers it.'
       : 'Every chart below covers this range.'}</span>
@@ -636,25 +641,93 @@ export function renderStats() {
     </div>`;
   }
 
-  const width = chartWidth();
-  const rows = hourly
-    ? hourlyBuckets(cfg, state.stats.events, width)
-    : dailyRows(cfg, state.stats.events, days);
+  const { rows, avg, sum } = analyse(cfg, state.stats.events, days, chartWidth());
+  const sections = chartSections(cfg, {
+    rows, avg, sum, events: state.stats.events, days, baby, width: chartWidth(),
+  });
+  const on = trackedMetrics(cfg);
+  const charts = chartPrefs(cfg);
+
+  return `
+    <div class="wrap">
+      <div class="section-title">Statistics · ${esc(baby.name)}</div>
+      ${rangeRow(hourly, cfg)}
+      ${summaryCard(cfg, { rows, avg, sum, baby, hourly })}
+      ${groupedHTML(sections.filter((x) => x.on))}
+      ${untrackedNote({ ...on, sides: sections.some((x) => x.id === 'viz-sides') }, charts)}
+
+      <div class="notice" style="border-color:color-mix(in srgb,var(--muted) 40%,transparent);background:var(--surface-2);color:var(--text)">
+        <b>📋 What to bring to the appointment</b>
+        These are the numbers a pediatrician usually asks for: intake, feeds, wet
+        and dirty diapers, sleep, the nutrients those feeds carried, and the
+        shape of the day. They describe what you logged and nothing more — they
+        are not a diagnosis, and a reference line on a chart is not a target to
+        hit. Anything that worries you is a phone call, not a chart.
+      </div>
+    </div>`;
+}
+
+/**
+ * The sections, with a heading wherever the group changes.
+ *
+ * The screen prints them in order; the report prints its own selection through
+ * the same function, so a group heading cannot end up over the wrong charts in
+ * one of the two.
+ */
+function groupedHTML(sections) {
+  let group = null;
+  return sections.map((x) => {
+    const head = x.group === group ? '' : groupHeading(x.group);
+    group = x.group;
+    return head + x.html;
+  }).join('');
+}
+
+/** The heading and standfirst that introduce a group of charts. */
+function groupHeading(group) {
+  if (group === 'Nutrients') {
+    return `<div class="section-title">Nutrients</div>
+      <p class="small muted" style="margin:-4px 4px 10px">
+        Only feeds with a recorded volume can be counted — a nursing session you
+        timed but did not measure has no volume to scale. Choose which nutrients
+        appear in Setup → Nutrition.
+      </p>`;
+  }
+  if (group === 'Your own buttons') {
+    return `<div class="section-title">Your own buttons</div>
+      <p class="small muted" style="margin:-4px 4px 10px">
+        Drawn from the fields each button records. Choose which of them appear —
+        and whether they share a chart — in Setup → Statistics.
+      </p>`;
+  }
+  return '';
+}
+
+/**
+ * One pass over the range, shared by the screen and the report.
+ *
+ * Returned rather than recomputed at each call site, because the headline tiles
+ * and the reference line on a chart have to agree about what "per day" means -
+ * and they can only be certain to if they came out of the same pass.
+ */
+export function analyse(cfg, events, days, width) {
+  const hourly = days === 1;
+  const rows = hourly ? hourlyBuckets(cfg, events, width) : dailyRows(cfg, events, days);
   const metricsByKey = new Map(
     customChartTypes(cfg).flatMap(({ type, metrics }) => metrics.map((m) => [`${type.id}.${m.key}`, m])),
   );
-  const avg = averages(rows, hourly, metricsByKey);
-  const sum = totals(rows);
-  const weight = Number(baby.weightKg) || 0;
+  return { rows, avg: averages(rows, hourly, metricsByKey), sum: totals(rows), hourly };
+}
+
+/** The figures a check-up asks for, above the charts that explain them. */
+export function summaryCard(cfg, { rows, avg, sum, baby, hourly }) {
   const sys = unitSystem(cfg);
+  const weight = Number(baby.weightKg) || 0;
   const perW = perWeight(sys);
   const vol = displayUnit('cc', sys);
   const volDp = decimalsFor('cc', sys, 0);
   const on = trackedMetrics(cfg);
-  const charts = chartPrefs(cfg);
   const nutrition = nutritionOn(cfg) && on.feeds;
-  // Only worth any of the nursing furniture when a button records sides at all
-  // and something in this range actually used it.
   const nursing = activeTypes(cfg).some(supportsSides)
     && rows.some((r) => r.values.nursedMin > 0);
 
@@ -672,10 +745,6 @@ export function renderStats() {
       : 'No full days yet'}${avg.partial ? ' — today is still in progress and is left out of the averages' : ''}.`;
 
   return `
-    <div class="wrap">
-      <div class="section-title">Statistics · ${esc(baby.name)}</div>
-      ${rangeRow(hourly, cfg)}
-
       <div class="card">
         <div class="stat-grid kpi">
           ${on.feeds ? statTile(`${vol} ${per}`, head.ml ? Number(toDisplay(head.ml, 'cc', sys).toFixed(volDp)) : '—', weight && head.ml ? `${(toDisplay(head.ml, 'cc', sys) / perW.of(weight)).toFixed(1)} ${vol}/${perW.unit}` : '') : ''}
@@ -692,29 +761,61 @@ export function renderStats() {
           ${esc(scope)}
           ${weight ? `Per-${perW.unit === 'lb' ? 'pound' : 'kilo'} figures use ${esc(fmtQty(weight, 'kg', sys, 2))} from ${esc(baby.name)}'s profile.` : `Add a weight in Setup → Babies for per-${perW.unit === 'lb' ? 'pound' : 'kilo'} figures.`}
         </p>
-      </div>
+      </div>`;
+}
 
-      ${on.feeds && charts.intake ? intakeChart(rows, avg, width, weight, hourly, sys) : ''}
-      ${on.feeds && charts.feeds ? feedCountChart(rows, avg, width, hourly) : ''}
-      ${on.diapers && charts.diapers ? diaperChart(rows, width, hourly) : ''}
-      ${on.sleep && charts.sleep ? sleepChart(rows, avg, width, hourly) : ''}
-      ${on.pump && charts.pump ? pumpChart(rows, avg, width, hourly, sys) : ''}
-      ${nursing && charts.sides ? sidesChart(rows, avg, width, hourly) : ''}
-      ${nutrition ? nutrientCharts(cfg, rows, avg, width, baby, hourly) : ''}
-      ${on.feeds && charts.clock && !hourly ? clockChart(cfg, state.stats.events, width) : ''}
-      ${customCharts(cfg, rows, avg, width, hourly)}
+/**
+ * Every chart this screen can draw for a range, in order, as
+ * `{ id, group, label, on, html }`.
+ *
+ * One list, read by two callers. The screen prints the entries whose `on` is
+ * true; the report offers all of them and pre-ticks the same ones. Built this
+ * way round rather than as two sequences of `if`s because the alternative -
+ * which this replaced - was a template in `renderStats` that a report would
+ * have had to reproduce, and reproduce again every time a chart was added.
+ *
+ * `on` is Setup's answer, not the data's: a chart with nothing in the range
+ * never gets an entry at all, because its builder returns an empty string. So
+ * everything here is a chart that could genuinely be drawn, and `on` is only
+ * whether the screen was asked to.
+ */
+export function chartSections(cfg, { rows, avg, sum, events, days, baby, width }) {
+  const hourly = days === 1;
+  const sys = unitSystem(cfg);
+  const weight = Number(baby.weightKg) || 0;
+  const on = trackedMetrics(cfg);
+  const want = chartPrefs(cfg);
+  const nutrition = nutritionOn(cfg) && on.feeds;
+  const nursing = activeTypes(cfg).some(supportsSides)
+    && rows.some((r) => r.values.nursedMin > 0);
 
-      ${untrackedNote({ ...on, sides: nursing }, charts)}
+  const out = [];
+  // `parts` is what a builder returns: the title, the plot, the note and the
+  // table twin, before either assembler has decided what to wrap them in. The
+  // screen wants a card; the report wants an expandable section. Handing both
+  // the same parts is what stops one of them quietly rendering something the
+  // other does not.
+  const add = (id, label, wanted, parts, group = '') => {
+    if (parts) out.push({ id, label, group, on: !!wanted, parts, html: chartCard(parts) });
+  };
 
-      <div class="notice" style="border-color:color-mix(in srgb,var(--muted) 40%,transparent);background:var(--surface-2);color:var(--text)">
-        <b>📋 What to bring to the appointment</b>
-        These are the numbers a pediatrician usually asks for: intake, feeds, wet
-        and dirty diapers, sleep, the nutrients those feeds carried, and the
-        shape of the day. They describe what you logged and nothing more — they
-        are not a diagnosis, and a reference line on a chart is not a target to
-        hit. Anything that worries you is a phone call, not a chart.
-      </div>
-    </div>`;
+  if (on.feeds) add('viz-intake', 'Milk in', want.intake, intakeChart(rows, avg, width, weight, hourly, sys));
+  if (on.feeds) add('viz-feeds', 'Feeds', want.feeds, feedCountChart(rows, avg, width, hourly));
+  if (on.diapers) add('viz-diapers', 'Diapers', want.diapers, diaperChart(rows, width, hourly));
+  if (on.sleep) add('viz-sleep', 'Sleep', want.sleep, sleepChart(rows, avg, width, hourly));
+  if (on.pump) add('viz-pump', 'Pumped', want.pump, pumpChart(rows, avg, width, hourly, sys));
+  if (nursing) add('viz-sides', 'Nursing by side', want.sides, sidesChart(rows, avg, width, hourly));
+  if (nutrition) {
+    for (const n of nutrientCards(cfg, rows, avg, width, baby, hourly)) {
+      add(n.id, n.label, true, n.parts, 'Nutrients');
+    }
+  }
+  // Hour of day against a range of one day would plot today against today.
+  if (on.feeds && !hourly) add('viz-clock', 'When feeds happen', want.clock, clockChart(cfg, events, width));
+  for (const c of customCards(cfg, rows, avg, width, hourly)) {
+    add(c.id, c.label, true, c.parts, 'Your own buttons');
+  }
+  return out;
 }
 
 /**
@@ -768,7 +869,7 @@ function intakeChart(rows, avg, width, weight, hourly, sys) {
   const perW = perWeight(sys);
   const data = rows.map((r) => ({ ...r, value: toDisplay(r.values.ml, 'cc', sys) }));
   const missed = rows.reduce((a, r) => a + r.values.unmeasured, 0);
-  return chartCard({
+  return ({
     id: 'viz-intake',
     title: `Milk in per ${xLabel(hourly)}`,
     subtitle: `${vol} from bottles and measured feeds${!hourly && weight && avg.ml ? ` · ${(toDisplay(avg.ml, 'cc', sys) / perW.of(weight)).toFixed(1)} ${vol}/${perW.unit}/day on average` : ''}`,
@@ -792,7 +893,7 @@ function intakeChart(rows, avg, width, weight, hourly, sys) {
 
 function feedCountChart(rows, avg, width, hourly) {
   const data = rows.map((r) => ({ ...r, value: r.values.feeds }));
-  return chartCard({
+  return ({
     id: 'viz-feeds',
     title: `Feeds per ${xLabel(hourly)}`,
     subtitle: 'Every breastfeed and bottle, measured or not',
@@ -813,7 +914,7 @@ function diaperChart(rows, width, hourly) {
     { key: 'wet', label: 'Wet', slot: 's1' },
     { key: 'dirty', label: 'Dirty', slot: 's2' },
   ];
-  return chartCard({
+  return ({
     id: 'viz-diapers',
     title: `Diapers per ${xLabel(hourly)}`,
     subtitle: 'Wet nappies are the everyday hydration check',
@@ -833,7 +934,7 @@ function diaperChart(rows, width, hourly) {
 
 function sleepChart(rows, avg, width, hourly) {
   const data = rows.map((r) => ({ ...r, value: r.values.sleepMin / 60 }));
-  return chartCard({
+  return ({
     id: 'viz-sleep',
     title: `Sleep per ${xLabel(hourly)}`,
     subtitle: 'Hours from timed sleeps only',
@@ -862,13 +963,10 @@ function sleepChart(rows, avg, width, hourly) {
  * The note under each chart says so, and the line is drawn in the same recessive
  * grey as the average rather than in a colour that would read as a threshold.
  */
-function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
-  const shown = shownNutrients(cfg);
-  if (!shown.length) return '';
-
-  const cards = shown.map((n) => {
+function nutrientCards(cfg, rows, avg, width, baby, hourly) {
+  return shownNutrients(cfg).map((n) => {
     const data = rows.map((r) => ({ ...r, value: r.nutrients[n.key] || 0 }));
-    if (!data.some((r) => r.value > 0)) return '';
+    if (!data.some((r) => r.value > 0)) return null;
 
     const ref = referenceFor(n.key, baby);
     const refs = ref?.value ? [{ value: ref.value, label: `${ref.kind === 'RDA' ? 'RDA' : 'ref'} ${tidy(ref.value)}` }] : [];
@@ -879,7 +977,7 @@ function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
     const perKg = n.key === 'kcal' && weight && mean
       ? ` · ${(mean / pw.of(weight)).toFixed(0)} kcal/${pw.unit}/day on average` : '';
 
-    return chartCard({
+    return { id: `viz-n-${n.key}`, label: n.label, parts: ({
       id: `viz-n-${n.key}`,
       title: `${n.label} per ${xLabel(hourly)}`,
       subtitle: `${n.emoji} ${n.unit} from the milk profile on each feed${perKg}`,
@@ -901,17 +999,8 @@ function nutrientCharts(cfg, rows, avg, width, baby, hourly) {
         rows: data,
         columns: [{ label: `${n.label} (${n.unit})`, get: (r) => (r.value ? r.value.toFixed(n.dp) : '0') }],
       }),
-    });
-  }).filter(Boolean).join('');
-
-  if (!cards) return '';
-  return `<div class="section-title">Nutrients</div>
-    <p class="small muted" style="margin:-4px 4px 10px">
-      Only feeds with a recorded volume can be counted — a nursing session you
-      timed but did not measure has no volume to scale. Choose which nutrients appear
-      in Setup → Nutrition.
-    </p>
-    ${cards}`;
+    }) };
+  }).filter(Boolean);
 }
 
 /**
@@ -925,10 +1014,10 @@ function pumpChart(rows, avg, width, hourly, sys) {
   const dp = decimalsFor('cc', sys, 0);
   const data = rows.map((r) => ({ ...r, value: toDisplay(r.values.pumpMl, 'cc', sys) }));
   const sessions = rows.reduce((a, r) => a + r.values.pumps, 0);
-  if (!sessions) return '';
+  if (!sessions) return null;
   const blank = sessions - rows.reduce((a, r) => a + (r.values.pumpMl > 0 ? r.values.pumps : 0), 0);
 
-  return chartCard({
+  return ({
     id: 'viz-pump',
     title: `Pumped per ${xLabel(hourly)}`,
     subtitle: `${vol} expressed, from the amount on each pump entry`,
@@ -960,7 +1049,7 @@ function pumpChart(rows, avg, width, hourly, sys) {
  */
 function sidesChart(rows, avg, width, hourly) {
   const sessions = rows.reduce((a, r) => a + (r.values.nursedMin > 0 ? 1 : 0), 0);
-  if (!sessions) return '';
+  if (!sessions) return null;
 
   const series = [
     { key: 'leftMin', label: 'Left', slot: 's1' },
@@ -973,7 +1062,7 @@ function sidesChart(rows, avg, width, hourly) {
   // something; under an hour a single long feed swings it entirely.
   const skew = total >= 60 ? Math.round((Math.max(left, right) / total) * 100) : null;
 
-  return chartCard({
+  return ({
     id: 'viz-sides',
     title: `Nursing by side per ${xLabel(hourly)}`,
     subtitle: `Minutes at the breast${skew !== null && skew >= 60
@@ -1139,7 +1228,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
   const data = rows.map((r) => ({
     ...r, value: metricValue(m, r.custom[id]), has: !!r.custom[id]?.n,
   }));
-  if (!data.some((r) => r.has)) return '';
+  if (!data.some((r) => r.has)) return null;
 
   if (isMeasured(m)) return measuredCard(cfg, type, m, data, width, hourly);
 
@@ -1152,7 +1241,7 @@ function singleCard(cfg, type, m, rows, avg, width, hourly) {
   const unit = asHours ? 'h' : (m.kind === 'count' || m.kind === 'toggle' ? '' : metricUnit(m, sys));
   const vizId = cardId(type, [m]);
 
-  return chartCard({
+  return ({
     id: vizId,
     title: `${type.emoji} ${m.kind === 'count' ? type.label : m.label} per ${xLabel(hourly)}`,
     subtitle: summaryLine(type, m, hourly, sys),
@@ -1203,7 +1292,7 @@ function measuredCard(cfg, type, m, data, width, hourly) {
     ? `The last reading each ${xLabel(hourly)}${shownUnit ? ` · ${shownUnit}` : ''}`
     : `The ${xLabel(hourly)}'s average${shownUnit ? ` · ${shownUnit}` : ''}`;
 
-  return chartCard({
+  return ({
     id: vizId,
     title: `${type.emoji} ${labelOf(type, m)}`,
     subtitle: what,
@@ -1248,7 +1337,7 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
   const raw = rows.map((r) => ({ ...r, values: values(r) }));
   // As in singleCard: presence is whether a value was recorded, not whether it
   // landed above zero.
-  if (!raw.some((r) => pair.some((m, k) => r.custom[ids[k]]?.n))) return '';
+  if (!raw.some((r) => pair.some((m, k) => r.custom[ids[k]]?.n))) return null;
 
   const peak = Math.max(...raw.flatMap((r) => pair.map((m) => r.values[m.key])));
   const asHours = asHoursScale(pair, peak);
@@ -1278,7 +1367,7 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
   const draw = stacked ? stackedColumnChart : groupedColumnChart;
   const total = (r) => pair.reduce((a, m) => a + (r.values[m.key] || 0), 0);
 
-  return chartCard({
+  return ({
     id: vizId,
     title: `${type.emoji} ${pair.map((m) => labelOf(type, m)).join(stacked ? ' + ' : ' and ')} per ${xLabel(hourly)}`,
     subtitle: `${how} ${tail}${stacked ? ' · the column is the total' : ''}`,
@@ -1318,26 +1407,25 @@ function pairCard(cfg, type, pair, rows, avg, width, hourly, stacked = false) {
  * column chart, with no chart code written for either. A metric with nothing in
  * the range draws nothing rather than a row of zeros.
  */
-function customCharts(cfg, rows, avg, width, hourly) {
-  const cards = customChartTypes(cfg).flatMap(({ type, metrics }) =>
-    chartGroups(cfg, type, metrics).map((group) => (group.length > 1
-      ? pairCard(cfg, type, group, rows, avg, width, hourly, stackCharts(cfg, type))
-      : singleCard(cfg, type, group[0], rows, avg, width, hourly))))
-    .filter(Boolean).join('');
-
-  if (!cards) return '';
-  return `<div class="section-title">Your own buttons</div>
-    <p class="small muted" style="margin:-4px 4px 10px">
-      Drawn from the fields each button records. Choose which of them appear —
-      and whether they share a chart — in Setup → Statistics.
-    </p>
-    ${cards}`;
+function customCards(cfg, rows, avg, width, hourly) {
+  return customChartTypes(cfg).flatMap(({ type, metrics }) =>
+    chartGroups(cfg, type, metrics).map((group) => {
+      const parts = group.length > 1
+        ? pairCard(cfg, type, group, rows, avg, width, hourly, stackCharts(cfg, type))
+        : singleCard(cfg, type, group[0], rows, avg, width, hourly);
+      if (!parts) return null;
+      return {
+        id: cardId(type, group),
+        label: `${type.label} · ${group.map((m) => labelOf(type, m)).join(' and ')}`,
+        parts,
+      };
+    })).filter(Boolean);
 }
 
 function clockChart(cfg, events, width) {
   const rows = clockRows(cfg, events, width);
-  if (!rows.some((r) => r.value)) return '';
-  return chartCard({
+  if (!rows.some((r) => r.value)) return null;
+  return ({
     id: 'viz-clock',
     title: 'When feeds happen',
     subtitle: 'Every feed in the range, by hour of the day',

@@ -15,6 +15,27 @@ async function request(path, options = {}) {
   return data;
 }
 
+/**
+ * Hand the user a file the page built itself.
+ *
+ * In a browser that is an anchor with `download` on it and nothing more. It is
+ * a named export rather than a helper inside charts.js because the Android
+ * build overlays this file and nothing else: a WebView answers no `<a
+ * download>` at all, so on a phone the same call has to reach the app instead.
+ * Everything above here just asks for a file and gets one.
+ */
+export async function saveFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
+}
+
 export const api = {
   state: (babyId = 'all', days = 7) => request(`/api/state?babyId=${encodeURIComponent(babyId)}&days=${days}`),
   saveConfig: (config) => request('/api/config', { method: 'PUT', body: config }),
