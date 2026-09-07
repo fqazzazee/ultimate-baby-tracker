@@ -16,6 +16,7 @@
  */
 
 import { esc } from './util.js';
+import { saveFile } from './api.js';
 
 const PAD = { top: 16, right: 10, bottom: 26, left: 38 };
 const MAX_BAR = 24;
@@ -522,7 +523,7 @@ export async function downloadChart(root, id, { footer = '' } = {}) {
     }
 
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
-    saveBlob(blob, `${slug(title)}-${new Date().toISOString().slice(0, 10)}.png`);
+    await saveFile(blob, `${slug(title)}-${new Date().toISOString().slice(0, 10)}.png`);
   } finally {
     URL.revokeObjectURL(svgURL);
   }
@@ -545,20 +546,11 @@ function mix(a, b) {
   return `rgb(${Math.round((r1 + r2) / 2)},${Math.round((g1 + g2) / 2)},${Math.round((b1 + b2) / 2)})`;
 }
 
-function slug(text) {
+export function slug(text) {
   return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'chart';
 }
 
-function saveBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+
 
 /**
  * The table toggle. Delegated from app.js's action map, so nothing here has to

@@ -309,8 +309,7 @@ the entries, the table twins and the CSV.
 
 Every chart carries three things: a **Table** button that unfolds the same values
 as text, a **⬇️ download** button that saves it as a PNG with its title, subtitle
-and a footer naming the baby and range — the thing to actually hand to a
-pediatrician — and keyboard-focusable bars. Nothing is reachable by colour or
+and a footer naming the baby and range, and keyboard-focusable bars. Nothing is reachable by colour or
 hover alone. The two series colours are chosen for colour-vision separation
 against both themes rather than to match the nursery pastels, which are far too
 pale to read as data.
@@ -322,6 +321,40 @@ design. Tap any tile on **Nutrition today** for the whole story.
 
 None of it is a diagnosis, and a reference note under a chart is not a target to
 hit. It is your own log, added up.
+
+### The report
+
+One chart at a time is the wrong shape for a check-up. **📋 Report**, beside the
+range picker, builds a single file with as many charts in it as you want.
+
+It asks three things before it builds anything:
+
+| | |
+|---|---|
+| **Range** | Its own, independent of what the screen is set to — 1 to 90 days |
+| **Measurements** | Its own too, so a household that types in millilitres can hand over a report in fluid ounces without changing the app |
+| **Which charts** | Everything the range actually has data for, listed and ticked. The ones your Setup switches already show arrive ticked; the rest are there to add |
+
+Plus two extras: the **summary figures** from the top of Stats at the head of the
+report, and the **data tables** under each chart.
+
+What comes out is one self-contained HTML file. Open it in any browser and print
+it from there.
+
+- **Every chart expands and collapses**, and so does the table under it. A report
+  with nine charts is a wall; one where the chart you are discussing is open and
+  the rest are a line each is a document you can hold. **Expand all** and
+  **Collapse all** are at the top.
+- **Printing opens everything first**, then puts it back the way you had it — a
+  collapsed section would otherwise be a section that did not print. Charts are
+  vectors, so they print at the printer's resolution rather than the phone's,
+  and no chart is split across two sheets.
+- **Nothing leaves the file.** No network request, no tracking, no fonts to
+  fetch; the only script in it opens and closes sections. Mail it, print it, put
+  it in a folder — it will still work in five years.
+
+The charts are the same ones the Stats screen draws, from the same code, so the
+report cannot quietly disagree with the screen it came from.
 
 ## Alarms
 

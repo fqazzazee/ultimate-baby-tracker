@@ -3,6 +3,66 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.13.0 — 2026-09-06
+
+### A printable report
+
+- **📋 Report**, beside the range picker on Stats, builds one file with as many
+  charts in it as you want. One chart at a time is the wrong shape for a
+  check-up, and a screen you have to scroll is the wrong shape for a
+  conversation.
+- **It asks three things first**, each independent of what the screen is set to:
+  a **range** (1 to 90 days), **metric or US** — so a household that types in
+  millilitres can hand over a report in fluid ounces without touching the app —
+  and **which charts**. Everything the chosen range actually has data for is
+  listed and tickable; the ones your Setup switches already show arrive ticked,
+  the rest are there to add. Changing the range relists, because a button used
+  twice in March has a chart over 90 days and none over 7.
+- Optionally the **summary figures** from the top of Stats, and the **data
+  table** under each chart.
+- **Every chart in the report expands and collapses, and so does its table.** A
+  report with nine charts is a wall; one where the chart you are discussing is
+  open and the rest are a line each is a document you can hold. **Expand all**
+  and **Collapse all** sit at the top.
+- **Printing opens every section first and puts them back afterwards** — a
+  collapsed section is a section that did not print. There is deliberately no
+  CSS trying to do this: a shut `<details>` hides its contents through the
+  browser's own shadow DOM, and neither `display` nor `content-visibility` on the
+  children reaches it. It was tried, and it printed a page of empty headings.
+- **One self-contained HTML file, not a PDF and not a folder of images.** A PDF
+  needs a library larger than this whole application. A folder of PNGs throws
+  away every number, and a chart's table is the part a clinician reads off. HTML
+  keeps the charts as vectors, so they print at the printer's resolution rather
+  than the phone's; keeps every figure as text, so it can be searched, copied and
+  read aloud; and opens in anything. No network request, no tracking, and the
+  only script in it opens and closes sections.
+- Page breaks never fall inside a chart, and the on-screen tools are not printed.
+
+### Changed
+
+- **`chartSections()` is now the single list of what Statistics can draw**, read
+  by both the screen and the report. Each chart builder returns its parts — the
+  title, the plot, the note, the table twin — and two assemblers render them: the
+  screen's card and the report's expandable section. Before this the screen was a
+  template of conditionals that a report would have had to reproduce, and
+  reproduce again every time a chart was added. Verified as a pure refactor: the
+  rendered Statistics screen is byte-identical across three ranges and both unit
+  systems apart from the new Report button.
+- Handing the user a file is now `saveFile()` in `api.js`, beside the rest of the
+  platform seam, rather than a helper inside `charts.js`.
+
+### Fixed
+
+- **Chart images could never be downloaded in the Android app.** `<a download>`
+  is silently swallowed by a WebView — there is no download manager behind it and
+  no `DownloadListener` was registered — so the ⬇️ button on every chart did
+  nothing at all, with no error anywhere. The bytes now go through the bridge and
+  land in **Downloads**, the same road the CSV and the backup already take. The
+  report would have inherited exactly the same silence.
+- `tools/sync-web-assets.sh` now fails the build if the assembled `api.js` has no
+  `saveFile` export, because a missing one is invisible until somebody taps a
+  download button.
+
 ## 1.12.0 — 2026-09-05
 
 ### Metric or US

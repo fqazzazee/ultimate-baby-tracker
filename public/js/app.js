@@ -15,6 +15,7 @@ import {
   loadNutrition, nutritionKey,
 } from './views.js';
 import { renderStats, loadStats, statsKey } from './stats.js';
+import { openReportSheet } from './report.js';
 import { toggleTable, downloadChart } from './charts.js';
 import { wireTips } from './tips.js';
 import {
@@ -397,6 +398,7 @@ const ACTIONS = {
     toast({ icon: '⬇️', text: 'Chart saved as a PNG', tone: 'sky', ms: 2500 });
   },
   'nutrient-info': (el) => openNutrientSheet(el.dataset.key),
+  report: () => openReportSheet(),
 
   export: () => exportCSV(),
   backup: () => downloadBackup(),
