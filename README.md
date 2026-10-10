@@ -2,6 +2,7 @@
 
 [![Live demo — tap the app in your browser](https://img.shields.io/badge/%F0%9F%8D%BC%20Live%20demo-tap%20it%20in%20your%20browser-f2a0bd?style=for-the-badge&labelColor=46313f)](https://ultimate-baby-tracker.safeqbit.com/demo/)
 [![Website — help and FAQ](https://img.shields.io/badge/Website-help%20%26%20FAQ-8fc4f0?style=for-the-badge&labelColor=46313f)](https://ultimate-baby-tracker.safeqbit.com)
+[![Buy me a coffee](https://img.shields.io/badge/%E2%98%95%20Buy%20me%20a%20coffee-support%20the%20project-ffdd00?style=for-the-badge&labelColor=46313f)](https://buymeacoffee.com/fqazzazee)
 
 [![Ultimate Baby Tracker: one tap at 3am, answers at the check-up — the Track screen on a laptop and a phone, a month of daily intake in Stats, and editable formula profiles in Setup](docs/slide/slide.png)](https://fqazzazee.github.io/ultimate-baby-tracker/docs/slide/)
 
@@ -188,3 +189,5 @@ than a second copy of a disk that can fail once.
 Licensed under the [PolyForm Strict License 1.0.0](LICENSE) — free for any noncommercial
 use; it does not permit redistribution or modified versions. Made with 🍼 and very
 little sleep.
+
+If it saves you some sleep too, you can [buy me a coffee ☕](https://buymeacoffee.com/fqazzazee).
