@@ -115,5 +115,11 @@ server {
 ## Reporting something
 
 This is a family notebook, not a product with a security team. If you find
-something worth flagging, open an issue on
-[the repository](https://github.com/fqazzazee/ultimate-baby-tracker/issues).
+something worth flagging, report it through
+[private vulnerability reporting](https://github.com/fqazzazee/ultimate-baby-tracker/security/advisories/new)
+rather than a public issue, so it can be fixed before everyone knows about it.
+
+The missing authentication and encryption described in
+[what it is not](#what-it-is-not) are by design, so there is no need to report
+them. Ordinary bugs still go in
+[the issue tracker](https://github.com/fqazzazee/ultimate-baby-tracker/issues).
