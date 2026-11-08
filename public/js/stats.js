@@ -296,18 +296,62 @@ const bucketKey = (date) => `${date.getFullYear()}-${date.getMonth() + 1}-${date
 /** Identifies the slice currently held, so a stale one can be spotted. */
 export const statsKey = () => `${state.babyId || 'all'}|${state.statsDays}`;
 
+/**
+ * How far before a range the slice reaches, for timed entries that began
+ * before it and ran into it. A day: no sleep runs longer, and a range's first
+ * morning is exactly where last night's sleep would otherwise go missing.
+ */
+const MAX_SPAN_MIN = 24 * 60;
+
+/**
+ * Minutes a timed entry ran for, or 0 for an entry that is a moment.
+ *
+ * `duration` is the wall clock a timer writes when it stops. A nursing entry
+ * logged by hand may have only its sides, and then those are its length.
+ */
+function spanMinutes(event) {
+  const d = event.data || {};
+  const dur = Number(d.duration);
+  if (Number.isFinite(dur) && dur > 0) return dur;
+  const sides = (Number(d.leftMin) || 0) + (Number(d.rightMin) || 0);
+  return sides > 0 ? sides : 0;
+}
+
+/**
+ * A range's entries, and separately the timed ones that started before it and
+ * ran on into it - `carry`.
+ *
+ * An entry's `at` is when it began, so asking the server for everything since
+ * midnight leaves out the sleep that started at nine last night and ended at
+ * six this morning: the one-day view's "Sleep today" showed only the naps.
+ * The carried entries are kept apart rather than mixed in because only the
+ * part of them inside the range counts - their feed, their diaper, their place
+ * on the hour-of-day chart all belong to a day the range does not show.
+ */
+export async function fetchSlice(babyId, days) {
+  const since = addDays(startOfDay(), -(days - 1)).getTime();
+  const { events: all } = await api.events({
+    babyId,
+    since: new Date(since - MAX_SPAN_MIN * 60_000).toISOString(),
+    limit: 20000,
+  });
+  const events = [];
+  const carry = [];
+  for (const e of all) {
+    const at = new Date(e.at).getTime();
+    if (at >= since) events.push(e);
+    else if (at + spanMinutes(e) * 60_000 > since) carry.push(e);
+  }
+  return { events, carry };
+}
+
 /** Pull the range's entries once; every chart on the screen reads this slice. */
 export async function loadStats() {
   const key = statsKey();
   const days = state.statsDays;
-  const since = addDays(startOfDay(), -(days - 1));
   try {
-    const { events } = await api.events({
-      babyId: state.babyId || 'all',
-      since: since.toISOString(),
-      limit: 20000,
-    });
-    state.stats = { key, days, events, loading: false, error: null };
+    const { events, carry } = await fetchSlice(state.babyId || 'all', days);
+    state.stats = { key, days, events, carry, loading: false, error: null };
   } catch (err) {
     state.stats = { ...state.stats, key, days, loading: false, error: err.message };
   }
@@ -348,25 +392,87 @@ function tally(cfg, milkIds, bucket, event) {
     if (d.pee) v.wet += 1;
     if (d.poop) v.dirty += 1;
   }
-  if (event.typeId === 'sleep') {
-    const mins = Number(d.duration) || 0;
-    v.sleepMin += mins;
-    v.longestSleep = Math.max(v.longestSleep, mins);
-  }
   // Pumping is milk coming out, never in: it is counted here and nowhere near
   // the intake or nutrient totals.
   if (event.typeId === 'pump') {
     v.pumps += 1;
     v.pumpMl += Number(d.amount) || 0;
   }
+  // Minutes of sleep and of nursing are not here: they are spread over the
+  // buckets the entry actually ran through, by tallySpan.
+}
+
+/**
+ * Fold the part of a timed entry that fell in this bucket into it.
+ *
+ * `share` is that part as a fraction of the whole entry. Only quantities that
+ * accrue with the clock are split this way - minutes asleep, minutes at the
+ * breast, a timer's own total on a button of your own. A feed is still one
+ * feed in the bucket it began in, and its millilitres go with it, because a
+ * bottle is not drunk evenly across midnight in any sense the chart could use.
+ *
+ * The longest stretch is the whole stretch, in every bucket it touched: a
+ * nine-hour night is a nine-hour night on both of the days it spans, not
+ * three hours on one and six on the other.
+ */
+function tallySpan(metrics, bucket, event, share) {
+  const d = event.data || {};
+  const v = bucket.values;
+  if (event.typeId === 'sleep') {
+    const mins = Number(d.duration) || 0;
+    v.sleepMin += mins * share;
+    v.longestSleep = Math.max(v.longestSleep, mins);
+  }
   // Time at the breast, split by side. Counted off the entry's own fields, so
   // a feed logged or corrected by hand counts exactly like a timed one.
   const left = Number(d.leftMin) || 0;
   const right = Number(d.rightMin) || 0;
   if (left || right) {
-    v.leftMin += left;
-    v.rightMin += right;
-    v.nursedMin += left + right;
+    v.leftMin += left * share;
+    v.rightMin += right * share;
+    v.nursedMin += (left + right) * share;
+  }
+  for (const m of metrics.get(event.typeId) || []) {
+    if (!spreads(m)) continue;
+    const n = numberOf(m, d);
+    if (n === null) continue;
+    const id = `${event.typeId}.${m.key}`;
+    const cell = bucket.custom[id] || (bucket.custom[id] = { n: 0, sum: 0, last: 0, at: '' });
+    cell.n += 1;
+    cell.sum += n * share;
+  }
+}
+
+/**
+ * Whether a generic metric is a timer's running total, and so spread over the
+ * hours it ran rather than credited to the one it started in. Only the field a
+ * timer writes - `duration` - and only when it is being added up; a duration
+ * field somebody types in ("screen time: 30 min") says nothing about when.
+ */
+const spreads = (m) => m.kind === 'duration' && m.key === 'duration' && m.agg === 'sum';
+
+/**
+ * Hand each timed entry's minutes to the buckets it ran through.
+ *
+ * Buckets carry `from` and `to` in milliseconds. A part that runs on past the
+ * last bucket - an entry logged with its start time a little in the future, or
+ * the hour still in progress - is given to the last bucket rather than lost,
+ * so a total can only move between columns and never shrink. A part before the
+ * first bucket belongs to a day the range does not show.
+ */
+function spreadTimed(metrics, rows, entries) {
+  if (!rows.length) return;
+  const last = rows[rows.length - 1];
+  for (const e of entries) {
+    const mins = spanMinutes(e);
+    if (!mins) continue;
+    const start = new Date(e.at).getTime();
+    const end = start + mins * 60_000;
+    for (const r of rows) {
+      const lo = Math.max(start, r.from);
+      const hi = r === last ? end : Math.min(end, r.to);
+      if (hi > lo) tallySpan(metrics, r, e, (hi - lo) / (end - start));
+    }
   }
 }
 
@@ -382,6 +488,7 @@ function tallyCustom(metrics, bucket, event) {
   if (!list) return;
   const d = event.data || {};
   for (const m of list) {
+    if (spreads(m)) continue; // see tallySpan
     const id = `${event.typeId}.${m.key}`;
     const cell = bucket.custom[id] || (bucket.custom[id] = { n: 0, sum: 0, last: 0, at: '' });
     if (m.kind === 'count') {
@@ -419,13 +526,15 @@ export function metricValue(metric, cell) {
  * nothing in them still get their empty column; only the run before the log
  * began is dropped.
  */
-function dailyRows(cfg, events, days) {
+function dailyRows(cfg, events, days, carry = []) {
   const milkIds = milkTypeIds(cfg);
   const metrics = customMetricMap(cfg);
   const today = startOfDay();
   const oldest = events.reduce((a, e) => (a === null || e.at < a ? e.at : a), null);
   let span = days;
-  if (oldest) {
+  // Something that ran into the range from before it means the log reaches
+  // back past the range, so the whole range is real.
+  if (oldest && !carry.length) {
     span = Math.max(1, Math.min(days, daysBetween(startOfDay(new Date(oldest)), today, days) + 1));
   }
 
@@ -434,6 +543,8 @@ function dailyRows(cfg, events, days) {
     const d = addDays(today, -i);
     rows.set(bucketKey(d), {
       date: d,
+      from: d.getTime(),
+      to: addDays(d, 1).getTime(),
       label: d.toLocaleDateString([], { day: 'numeric', month: 'numeric' }),
       full: d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
       ...emptyBucket(),
@@ -444,6 +555,7 @@ function dailyRows(cfg, events, days) {
     const row = rows.get(bucketKey(new Date(e.at)));
     if (row) { tally(cfg, milkIds, row, e); tallyCustom(metrics, row, e); }
   }
+  spreadTimed(metrics, [...rows.values()], [...carry, ...events]);
   return [...rows.values()];
 }
 
@@ -454,19 +566,24 @@ function dailyRows(cfg, events, days) {
  * flat run of empty columns to midnight reads as "the baby stopped eating",
  * which is the opposite of what an 11 a.m. chart means.
  */
-function hourlyBuckets(cfg, events, width) {
+function hourlyBuckets(cfg, events, width, carry = []) {
   const milkIds = milkTypeIds(cfg);
   const metrics = customMetricMap(cfg);
   const step = width < 420 ? 2 : 1;
   const start = startOfDay();
   const nowHour = new Date().getHours();
   const rows = [];
+  // Set on the calendar rather than added in milliseconds, for the reason
+  // startOfDay gives: on a clock-change day an hour is missing or doubled.
+  const at = (h) => { const x = new Date(start); x.setHours(h, 0, 0, 0); return x.getTime(); };
 
   for (let h = 0; h < 24; h += step) {
     if (h > nowHour) break;
     const to = Math.min(23, h + step - 1);
     rows.push({
       hour: h,
+      from: at(h),
+      to: h + step >= 24 ? addDays(start, 1).getTime() : at(h + step),
       label: h % (step === 1 ? 3 : 2) === 0 ? `${h}` : '',
       full: step === 1
         ? `${String(h).padStart(2, '0')}:00–${String(h).padStart(2, '0')}:59`
@@ -476,11 +593,12 @@ function hourlyBuckets(cfg, events, width) {
   }
 
   for (const e of events) {
-    const at = new Date(e.at);
-    if (at < start) continue;
-    const row = rows[Math.floor(at.getHours() / step)];
+    const when = new Date(e.at);
+    if (when < start) continue;
+    const row = rows[Math.floor(when.getHours() / step)];
     if (row) { tally(cfg, milkIds, row, e); tallyCustom(metrics, row, e); }
   }
+  spreadTimed(metrics, rows, [...carry, ...events.filter((e) => new Date(e.at) >= start)]);
   return rows;
 }
 
@@ -667,14 +785,15 @@ export function renderStats() {
   if (state.stats.loading) {
     return `<div class="wrap">${rangeRow(hourly, cfg)}<div class="empty"><span class="big">📊</span>Reading the log…</div></div>`;
   }
-  if (!state.stats.events.length) {
+  const carry = state.stats.carry || [];
+  if (!state.stats.events.length && !carry.length) {
     return `<div class="wrap">
       ${rangeRow(hourly, cfg)}
       <div class="empty"><span class="big">🧸</span>Nothing logged ${hourly ? 'today' : `in the last ${days} days`} yet.</div>
     </div>`;
   }
 
-  const { rows, avg, sum } = analyse(cfg, state.stats.events, days, chartWidth());
+  const { rows, avg, sum } = analyse(cfg, state.stats.events, days, chartWidth(), carry);
   const sections = chartSections(cfg, {
     rows, avg, sum, events: state.stats.events, days, baby, width: chartWidth(),
   });
@@ -743,9 +862,9 @@ function groupHeading(group) {
  * and the reference line on a chart have to agree about what "per day" means -
  * and they can only be certain to if they came out of the same pass.
  */
-export function analyse(cfg, events, days, width) {
+export function analyse(cfg, events, days, width, carry = []) {
   const hourly = days === 1;
-  const rows = hourly ? hourlyBuckets(cfg, events, width) : dailyRows(cfg, events, days);
+  const rows = hourly ? hourlyBuckets(cfg, events, width, carry) : dailyRows(cfg, events, days, carry);
   const metricsByKey = new Map(
     customChartTypes(cfg).flatMap(({ type, metrics }) => metrics.map((m) => [`${type.id}.${m.key}`, m])),
   );
