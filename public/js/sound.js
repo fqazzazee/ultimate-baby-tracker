@@ -98,8 +98,14 @@ function alarmPhrase() {
   seq.forEach((f, i) => note(f, i * 0.16, 0.30, 0.34, i % 2 ? 'triangle' : 'sine'));
 }
 
+/**
+ * Ring an alarm. Deliberately not gated on the Sounds setting: that toggle is
+ * "chime when something is logged", and parents switch it off at night to keep
+ * taps quiet - which is exactly when the feed alarm has to be heard. An alarm
+ * has its own on/off switch and quiet hours; those are what silence it.
+ */
 export function startRinging() {
-  if (!enabled || ringTimer) return;
+  if (ringTimer) return;
   unlock();
   alarmPhrase();
   ringTimer = setInterval(alarmPhrase, 1600);
