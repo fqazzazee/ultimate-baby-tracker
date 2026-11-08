@@ -285,11 +285,17 @@ export function fieldsHTML(type, data = {}, cfg = null) {
  * exactly. That guard is not a nicety: without it, opening an entry in US units
  * and pressing Save would store 29.57 where 30 had been, and again on the next
  * edit, and again.
+ *
+ * A field that applyShowIf() has hidden is skipped. Its box still holds
+ * whatever it held - untick Poop on a Mustard diaper and the colour is still
+ * Mustard underneath - and saving it would make History read "Wet · Mustard"
+ * and keep the colour's alert pill showing for a wet nappy.
  */
 export function collectFields(root, cfg = null) {
   const sys = unitSystem(cfg);
   const out = {};
   root.querySelectorAll('[data-field]').forEach((el) => {
+    if (hiddenByShowIf(el)) return;
     const key = el.dataset.field;
     if (el.dataset.kind === 'toggle') {
       if (el.checked) out[key] = true;
@@ -307,6 +313,28 @@ export function collectFields(root, cfg = null) {
     }
   });
   return out;
+}
+
+/**
+ * An entry's data after an edit: what it held before, with every field the
+ * form rendered replaced by what the form now says.
+ *
+ * An entry carries more than its button's fields - every breastfeed stores
+ * `firstSide`, which the next-side hint reads - and an entry whose button has
+ * since been deleted renders no fields at all. Saving collectFields() alone
+ * dropped all of that. So only a key the form actually showed can change or
+ * disappear: cleared, or hidden by show-if (collectFields leaves those out,
+ * and the old value must not survive underneath).
+ */
+export function mergeFields(previous, root, cfg = null) {
+  const out = { ...(previous || {}) };
+  root.querySelectorAll('[data-field]').forEach((el) => { delete out[el.dataset.field]; });
+  return { ...out, ...collectFields(root, cfg) };
+}
+
+/** True when `el` sits inside a field applyShowIf() has hidden. */
+function hiddenByShowIf(el) {
+  return el.closest('[data-showif].hidden') !== null;
 }
 
 /**
