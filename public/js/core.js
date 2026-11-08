@@ -62,28 +62,51 @@ let refreshing = null;
 const afterRefresh = [];
 export function onRefresh(fn) { afterRefresh.push(fn); }
 
-export async function refresh() {
-  if (refreshing) return refreshing;
+/**
+ * Set when refresh() is called while one is already in flight. That request
+ * may have been answered before the change the caller is reacting to - a
+ * quickLog's own refresh, or the event-stream ping for it - so simply awaiting
+ * it can leave the screen showing the old state until the next poll, and a tap
+ * that seems not to register invites a second one. Instead the running refresh
+ * goes round once more when it finishes. However many calls arrive meanwhile,
+ * that is one extra request, not one each.
+ */
+let refreshAgain = false;
+
+export function refresh() {
+  if (refreshing) {
+    refreshAgain = true;
+    return refreshing;
+  }
   refreshing = (async () => {
     try {
-      const data = await api.state(state.babyId || 'all', state.historyDays);
-      state.data = data;
-      state.connected = true;
-      reconcileSelections();
-      applySettings();
-      for (const fn of afterRefresh) {
-        try { await fn(); } catch (err) { console.warn('[refresh hook]', err.message); }
-      }
-      render();
-    } catch (err) {
-      state.connected = false;
-      console.warn('[refresh]', err.message);
-      render();
+      do {
+        refreshAgain = false;
+        await refreshOnce();
+      } while (refreshAgain);
     } finally {
       refreshing = null;
     }
   })();
   return refreshing;
+}
+
+async function refreshOnce() {
+  try {
+    const data = await api.state(state.babyId || 'all', state.historyDays);
+    state.data = data;
+    state.connected = true;
+    reconcileSelections();
+    applySettings();
+    for (const fn of afterRefresh) {
+      try { await fn(); } catch (err) { console.warn('[refresh hook]', err.message); }
+    }
+    render();
+  } catch (err) {
+    state.connected = false;
+    console.warn('[refresh]', err.message);
+    render();
+  }
 }
 
 /** Keep the selected baby/person pointing at something that still exists. */
