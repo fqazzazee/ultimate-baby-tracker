@@ -3,6 +3,20 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## Unreleased
+
+### Docs
+
+- **The install instructions now work on a fresh Mac.** They no longer assume
+  Homebrew: Node comes from the nodejs.org installer, and git from
+  `xcode-select --install`, since the `git` a Mac ships is only a placeholder.
+- The README, manual and install guide were checked against the code:
+  `BT_BACKUP_DIR` is documented, the HTTP API table lists every route, the
+  printable report and metric/US units are mentioned where features are listed,
+  and claims about alarms in a background tab and installing as an app now say
+  what they need.
+- The README links to Buy Me a Coffee.
+
 ## 1.13.0 — 2026-09-06
 
 ### A printable report

@@ -52,7 +52,15 @@ entry. Keep the file as private as `data/` itself. `GET /api/backup` and
 `POST /api/restore` are unauthenticated like the rest of the API: anything that
 can reach the port can take a full copy of your data, or replace it.
 
+The same goes for automatic backups. Whatever `BT_BACKUP_DIR` points at — a NAS
+share, a synced folder — ends up holding the PIN hashes and every entry, so give
+it the same care.
+
 ## Putting it behind a proxy
+
+A proxy that adds HTTPS also unlocks two browser features that plain
+`http://<LAN-IP>` cannot have: installing the page as an app, and alarm
+notifications.
 
 `./scripts/install.sh --system install` writes a hardened unit for you. The one
 below is the hand-rolled equivalent, if you would rather own it yourself.
