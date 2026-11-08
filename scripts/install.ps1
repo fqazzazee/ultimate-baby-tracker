@@ -467,6 +467,9 @@ function Backup-Data {
 function Write-Shim {
   param([string]$NodePath)
 
+  # With -Dir and -Data both elsewhere, nothing else has created it yet.
+  if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
+
   # A % in a path would be read by cmd.exe as the start of a variable; %%
   # is a literal one. Read-ShimSettings undoes this.
   $app = Get-FullPath $AppDir
