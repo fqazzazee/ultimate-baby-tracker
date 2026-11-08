@@ -335,7 +335,9 @@ async function generate(baby) {
  */
 function chartBlock(section, withTable) {
   const p = section.parts;
-  const sub = stripTags(p.subtitle || '');
+  // Plain text, as on the screen - see chartCard. Stripping tags instead would
+  // quietly eat an option somebody really did call "<3 cuddles".
+  const sub = p.subtitle || '';
   const table = withTable && p.table
     ? `<details class="rep-data">
         <summary>Every value · ${bodyRows(p.table)} row${bodyRows(p.table) === 1 ? '' : 's'}</summary>
@@ -363,11 +365,6 @@ function chartBlock(section, withTable) {
  */
 function bodyRows(table) {
   return (String(table).match(/<tr><th scope="row">/g) || []).length;
-}
-
-/** Subtitles carry a little markup; a summary line wants plain text. */
-function stripTags(html) {
-  return String(html).replace(/<[^>]*>/g, '');
 }
 
 /** "24 Aug – 6 Sep 2026", or just the day when the range is one. */

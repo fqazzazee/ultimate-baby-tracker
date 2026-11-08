@@ -228,7 +228,7 @@ export function fieldHTML(field, value, cfg = null) {
     case 'duration':
       body = `<div class="row">
           <input type="number" data-field="${key}" data-kind="number" inputmode="numeric"
-                 min="0" step="1" value="${value ?? ''}" placeholder="minutes">
+                 min="0" step="1" value="${esc(value ?? '')}" placeholder="minutes">
           <span class="muted small">min</span>
         </div>
         <div class="preset-row" style="margin-top:8px">
@@ -255,7 +255,7 @@ export function fieldHTML(field, value, cfg = null) {
           <button type="button" class="btn sm" data-bump="${key}" data-value="-${step}">−</button>
           <input type="number" data-field="${key}" data-kind="number" inputmode="decimal"
                  data-unit="${esc(field.unit || '')}" data-shown="${shown}"
-                 data-canonical="${value ?? ''}"
+                 data-canonical="${esc(value ?? '')}"
                  ${field.min !== undefined ? `min="${bound(field.min)}"` : ''}
                  ${field.max !== undefined ? `max="${bound(field.max)}"` : ''}
                  step="${step}" value="${shown}">
