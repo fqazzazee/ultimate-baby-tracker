@@ -4,7 +4,7 @@ import {
   state, config, currentBaby, currentUser, settings,
   refresh, render, setRenderer, saveConfig, toast, closeSheet, sheetOpen,
   quickLog, openLogSheet, stopRunningTimer, cancelRunningTimer, switchFeedSide, applyTheme,
-  isUnlocked, lockProfile, onRefresh,
+  isUnlocked, lockProfile, onRefresh, setUnlocker,
 } from './core.js';
 import { api, subscribe } from './api.js';
 import * as sound from './sound.js';
@@ -357,11 +357,29 @@ const ACTIONS = {
     if (isUnlocked(id)) return select();
     unlockProfile(id, select);
   },
+  /**
+   * Locking has to move the app off this person too. Clearing the unlock alone
+   * left them selected, and every one-tap log went on going under their name
+   * with no PIN until a reload. The app moves to someone it may log as; when
+   * there is nobody, the PIN pad asks for one.
+   */
   'lock-profile': () => {
-    lockProfile(state.userId);
+    const locked = state.userId;
+    lockProfile(locked);
     sound.play('undo');
-    toast({ icon: '🔒', text: 'Profile locked', tone: 'lavender', ms: 2000 });
+    const next = config().users.find((u) => u.id !== locked && isUnlocked(u.id));
+    if (next) {
+      state.userId = next.id;
+      store.set('userId', next.id);
+    }
+    toast({
+      icon: '🔒',
+      text: next ? `Profile locked · logging as <b>${esc(next.name)}</b>` : 'Profile locked',
+      tone: 'lavender',
+      ms: 2500,
+    });
     render();
+    if (!next) ensureProfileUnlocked();
   },
   'theme-cycle': () => {
     const order = ['auto', 'light', 'dark'];
@@ -539,6 +557,7 @@ function ensureProfileUnlocked() {
 
 async function boot() {
   setRenderer(renderAll);
+  setUnlocker(unlockProfile);
   applyTheme('auto');
   onRefresh(() => (state.tab === 'stats' ? loadStats() : null));
   onRefresh(() => (state.tab === 'track' ? loadNutrition() : null));

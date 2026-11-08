@@ -204,6 +204,21 @@ export function lockProfile(userId) {
   writeUnlocked(unlockedIds().filter((id) => id !== userId));
 }
 
+/**
+ * The PIN pad lives in settings.js, which imports this module; importing it
+ * back would close a cycle, so app.js hands it over at boot - the same
+ * arrangement as onRefresh. Called as (userId, onSuccess, onCancel).
+ */
+let unlocker = null;
+export function setUnlocker(fn) { unlocker = fn; }
+
+/** Run `then` as `userId`, asking for their PIN first if the profile is locked. */
+export function whenUnlocked(userId, then, onCancel) {
+  if (isUnlocked(userId)) return then();
+  if (unlocker) return unlocker(userId, then, onCancel);
+  toast({ icon: '🔒', text: 'That profile is locked', tone: 'peach' });
+}
+
 /* --------------------------------------------------------------- feedback */
 
 export function toast({ icon = '✅', text, tone = 'mint', actions = [], ms = 5000 }) {
@@ -309,6 +324,10 @@ export async function quickLog(typeId, presetId) {
     toast({ icon: '👶', text: 'Add a baby first', tone: 'peach' });
     return;
   }
+
+  // The remembered profile can still be a locked one - the PIN pad shown at
+  // boot closes on Escape - and a one-tap log must not go under that name.
+  if (!isUnlocked(user.id)) return whenUnlocked(user.id, () => quickLog(typeId, presetId));
 
   // A measurement is numbers you have to type, so the button opens the form
   // rather than saving an empty entry you then have to go and fix.
@@ -468,15 +487,24 @@ export async function cancelRunningTimer(id) {
  * The full editor for one entry - opened from "Details", from a history row,
  * or from the "+ more" button on a card (with `event` omitted for a new one).
  */
-export function openLogSheet({ event = null, typeId = null, presetId = null }) {
+export function openLogSheet({ event = null, typeId = null, presetId = null, draft = null }) {
   const cfg = config();
   const tid = event?.typeId || typeId;
   const type = typeOf(cfg, tid);
   const preset = (type.presets || []).find((p) => p.id === (event?.presetId ?? presetId));
   const data = event?.data || { ...defaultsFor(type), ...(preset?.data || {}) };
   const isNew = !event;
-  const chosenUser = event?.userId || state.userId;
-  const chosenBaby = event?.babyId || state.babyId;
+  // `draft` is the sheet's own half-finished state, handed back when it is
+  // reopened after the PIN pad (which, being a sheet itself, replaced it).
+  const shown = draft?.data ?? data;
+  const chosenUser = draft?.userId || event?.userId || state.userId;
+  const chosenBaby = draft?.babyId || event?.babyId || state.babyId;
+  const chosenAt = draft?.at ?? event?.at;
+  const chosenNote = draft?.note ?? event?.note ?? '';
+  // Choosing a PIN-protected person needs their PIN, as it does in the header.
+  // The entry's own person is exempt: putting an edit back the way it was is
+  // not logging anything new under their name.
+  const needsPin = (userId) => userId !== event?.userId && !isUnlocked(userId);
 
   const html = `
     <h3>${esc(type.emoji)} ${esc(isNew ? `Log ${type.label}` : `Edit ${type.label}`)}</h3>
@@ -488,7 +516,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
           <button type="button" class="btn sm" data-choose="userId" data-value="${esc(u.id)}"
             aria-pressed="${u.id === chosenUser}"
             style="${u.id === chosenUser ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">
-            ${esc(u.emoji)} ${esc(u.name)}
+            ${esc(u.emoji)} ${esc(u.name)}${needsPin(u.id) ? ' 🔒' : ''}
           </button>`).join('')}
       </div>
       <input type="hidden" data-meta="userId" value="${esc(chosenUser || '')}">
@@ -510,7 +538,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
 
     <label class="field">
       <span class="lab">When</span>
-      <input type="datetime-local" data-meta="at" value="${toLocalInput(event?.at)}">
+      <input type="datetime-local" data-meta="at" value="${toLocalInput(chosenAt)}">
       <div class="preset-row" style="margin-top:8px">
         <button type="button" class="btn sm" data-nudge="-15">−15m</button>
         <button type="button" class="btn sm" data-nudge="-5">−5m</button>
@@ -519,11 +547,11 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
       </div>
     </label>
 
-    <div data-fields>${fieldsHTML(type, data, cfg)}</div>
+    <div data-fields>${fieldsHTML(type, shown, cfg)}</div>
 
     <label class="field">
       <span class="lab">Note</span>
-      <textarea data-meta="note" placeholder="Anything worth remembering…">${esc(event?.note || '')}</textarea>
+      <textarea data-meta="note" placeholder="Anything worth remembering…">${esc(chosenNote)}</textarea>
     </label>
 
     <div class="sheet-actions">
@@ -539,6 +567,13 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
     // Chip groups that write into a hidden [data-meta] input.
     sheet.addEventListener('click', (ev) => {
       const choose = ev.target.closest('[data-choose]');
+      if (choose?.dataset.choose === 'userId' && needsPin(choose.dataset.value)) {
+        const wanted = choose.dataset.value;
+        const held = readDraft();
+        const reopen = (userId) => openLogSheet({ event, typeId, presetId, draft: { ...held, userId } });
+        whenUnlocked(wanted, () => reopen(wanted), () => reopen(held.userId));
+        return;
+      }
       if (choose && ['userId', 'babyId'].includes(choose.dataset.choose)) {
         const key = choose.dataset.choose;
         sheet.querySelector(`[data-meta="${key}"]`).value = choose.dataset.value;
@@ -578,7 +613,25 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
       return out;
     };
 
+    /** Everything typed so far, to survive the sheet being replaced. */
+    function readDraft() {
+      return {
+        userId: sheet.querySelector('[data-meta="userId"]').value,
+        babyId: sheet.querySelector('[data-meta="babyId"]').value,
+        at: fromLocalInput(sheet.querySelector('[data-meta="at"]').value),
+        note: sheet.querySelector('[data-meta="note"]').value,
+        data: savedData(),
+      };
+    }
+
     sheet.querySelector('[data-save]').addEventListener('click', async () => {
+      const who = sheet.querySelector('[data-meta="userId"]').value;
+      // The chips already ask; this catches a new entry opened while the
+      // remembered profile is still a locked one.
+      if (needsPin(who)) {
+        const held = readDraft();
+        return whenUnlocked(who, () => openLogSheet({ event, typeId, presetId, draft: held }));
+      }
       const payload = {
         babyId: sheet.querySelector('[data-meta="babyId"]').value,
         userId: sheet.querySelector('[data-meta="userId"]').value,
