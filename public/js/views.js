@@ -597,6 +597,11 @@ export function renderHistory() {
       <div class="section-title">History</div>
       ${rangeSeg}
       ${filterChips}
+      ${state.data?.eventsTruncated ? `
+        <div class="small muted" style="margin:0 0 10px">
+          Showing the newest ${esc(String(all.length))} entries for this range; older days in it are left out.
+          Pick a shorter range, or use Export CSV for everything.
+        </div>` : ''}
       ${body}
       <button class="btn wide" data-act="export" style="margin-top:14px">⬇️ Export CSV</button>
     </div>`;
