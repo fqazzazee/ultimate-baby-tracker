@@ -3,7 +3,7 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
-## Unreleased
+## 1.14.0 — 2026-11-08
 
 ### Added
 
@@ -75,21 +75,13 @@ and the version in `package.json` is what the header and the About card display.
 - Backup names use local time with the UTC offset, so an evening backup no
   longer carries tomorrow's date. (#44)
 
-**Installers**
+**Server**
 
-- On a Mac without the Command Line Tools, the one-line install falls back to
-  downloading the app instead of failing at the placeholder `git`. (#29)
-- A failed update no longer leaves the service stopped: it downloads first,
-  then stops, snapshots, switches and starts, and restarts the service if
-  anything fails. Local edits in the app directory no longer abort it. (#31)
-- `update --branch` can switch branches. (#35)
-- Windows: `status`, `stop`, `restart` and `update` find the running server;
-  later commands remember `-Port`, `-Listen`, `-Dir` and `-Data`; the task
-  restarts the server after a crash. (#32, #33, #36)
-- Smaller fixes: paths with spaces, `--system` remembered, `--port` without a
-  value, hints that named the wrong script or dropped the host, snapshots
-  beside a custom data directory, and `-Purge` reporting a removal that
-  failed. (#37)
+- **A malformed request no longer stops the server.** A stray `%` in a URL or
+  an odd `Host` header threw outside any handler and ended the process; it is
+  now answered with 400. (#38)
+
+**Installers**
 
 - **The installers no longer delete a directory that is not theirs.** Pointing
   `--dir` (`-Dir` on Windows) at a folder that already held anything other than
@@ -103,11 +95,21 @@ and the version in `package.json` is what the header and the About card display.
   an existing install, say how to move the data out first. `uninstall` also
   checks that what it is about to delete is the app and, with `--purge`, the
   data, before it touches the service. (#28)
-- **A malformed request no longer stops the server.** A stray `%` in a URL or
-  an odd `Host` header threw outside any handler and ended the process; it is
-  now answered with 400. (#38)
+- On a Mac without the Command Line Tools, the one-line install falls back to
+  downloading the app instead of failing at the placeholder `git`. (#29)
+- A failed update no longer leaves the service stopped: it downloads first,
+  then stops, snapshots, switches and starts, and restarts the service if
+  anything fails. Local edits in the app directory no longer abort it. (#31)
+- `update --branch` can switch branches. (#35)
 - Installing or updating without git no longer ends with *"tmp: unbound
   variable"* and exit code 1. (#34)
+- Windows: `status`, `stop`, `restart` and `update` find the running server;
+  later commands remember `-Port`, `-Listen`, `-Dir` and `-Data`; the task
+  restarts the server after a crash. (#32, #33, #36)
+- Smaller fixes: paths with spaces, `--system` remembered, `--port` without a
+  value, hints that named the wrong script or dropped the host, snapshots
+  beside a custom data directory, and `-Purge` reporting a removal that
+  failed. (#37)
 
 ### Docs
 
