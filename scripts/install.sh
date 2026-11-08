@@ -53,18 +53,27 @@ else
   B=''; DIM=''; RED=''; GRN=''; YEL=''; R=''
 fi
 
-# Piped from curl, $0 is "bash", so the hints have to name something runnable.
-case "${0##*/}" in
-  bash|sh|-bash|-sh|"") SELF="./scripts/install.sh" ;;
-  *) SELF="$0" ;;
-esac
-
 say()  { printf '%s\n' "$*"; }
 step() { printf '%s==>%s %s\n' "$B" "$R" "$*"; }
 ok()   { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
 warn() { printf '  %s!%s %s\n' "$YEL" "$R" "$*" >&2; }
 die()  { printf '%serror:%s %s\n' "$RED" "$R" "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# A value as you would type it into a shell: as is when that is safe, otherwise
+# in single quotes. For the commands this script prints for you to copy.
+sh_word() {
+  case "$1" in
+    ""|*[!A-Za-z0-9_./:@%+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The command that runs the server in the foreground, for when there is no
+# service to do it.
+run_by_hand() {
+  say "    BT_DATA_DIR=$(sh_word "$DATA_DIR") BT_PORT=$(sh_word "$PORT") BT_HOST=$(sh_word "$HOST") node $(sh_word "$APP_DIR/server.js")"
+}
 
 # ------------------------------------------------------------------- checks --
 
@@ -348,6 +357,30 @@ snapshot_data() {
 
 # ------------------------------------------------------------------ service --
 
+# systemd reads a unit line its own way: % starts a specifier everywhere, $
+# expands a variable in ExecStart's arguments (though not in the program path),
+# and whitespace splits ExecStart, Environment and ReadWritePaths into words
+# unless they are double-quoted. These write a value so that systemd reads back
+# exactly what was given - a data directory called "Baby Tracker" included.
+sd_quote() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g')"
+}
+sd_exec_arg() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g' -e 's/\$/$$/g')"
+}
+# WorkingDirectory= takes the rest of the line as one path, quotes and all.
+sd_path() { printf '%s' "$1" | sed 's/%/%%/g'; }
+
+# And the reverse, for reading our own unit back. Units written before values
+# were quoted have Environment=BT_PORT=8477, so that form is read too.
+unit_env() {
+  sed -n -e "s/^Environment=\"$2=\\(.*\\)\"\$/\\1/p" -e "s/^Environment=$2=//p" "$1" | tail -1 \
+    | sed -e 's/\\\(.\)/\1/g' -e 's/%%/%/g'
+}
+unit_workdir() {
+  sed -n 's/^WorkingDirectory=//p' "$1" | tail -1 | sed 's/%%/%/g'
+}
+
 write_user_unit() {
   mkdir -p "$UNIT_DIR"
   cat > "$(unit_path)" <<UNIT
@@ -359,11 +392,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$APP_DIR
-ExecStart=$(command -v node) $APP_DIR/server.js
-Environment=BT_PORT=$PORT
-Environment=BT_HOST=$HOST
-Environment=BT_DATA_DIR=$DATA_DIR
+WorkingDirectory=$(sd_path "$APP_DIR")
+ExecStart=$(sd_quote "$(command -v node)") $(sd_exec_arg "$APP_DIR/server.js")
+Environment=$(sd_quote "BT_PORT=$PORT")
+Environment=$(sd_quote "BT_HOST=$HOST")
+Environment=$(sd_quote "BT_DATA_DIR=$DATA_DIR")
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
@@ -397,11 +430,11 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-WorkingDirectory=$APP_DIR
-ExecStart=$(command -v node) $APP_DIR/server.js
-Environment=BT_PORT=$PORT
-Environment=BT_HOST=$HOST
-Environment=BT_DATA_DIR=$DATA_DIR
+WorkingDirectory=$(sd_path "$APP_DIR")
+ExecStart=$(sd_quote "$(command -v node)") $(sd_exec_arg "$APP_DIR/server.js")
+Environment=$(sd_quote "BT_PORT=$PORT")
+Environment=$(sd_quote "BT_HOST=$HOST")
+Environment=$(sd_quote "BT_DATA_DIR=$DATA_DIR")
 Restart=on-failure
 RestartSec=3
 # Nothing here needs privileges or anything outside its own data directory.
@@ -409,7 +442,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=$DATA_DIR
+ReadWritePaths=$(sd_quote "$DATA_DIR")
 
 [Install]
 WantedBy=multi-user.target
@@ -421,7 +454,7 @@ service_add() {
   has_systemd || {
     warn "No systemd here, so there is no service to add."
     say  "  Run it by hand instead:"
-    say  "    BT_DATA_DIR='$DATA_DIR' BT_PORT=$PORT node '$APP_DIR/server.js'"
+    run_by_hand
     return 0
   }
   step "Installing the $([ "$MODE" = system ] && echo system || echo user) service"
@@ -433,13 +466,15 @@ service_add() {
   # A user service stops at logout unless lingering is on. Ask for it; if the
   # policy says no, say so rather than leaving a service that quietly dies.
   if [ "$MODE" = "user" ]; then
-    if loginctl show-user "$USER" -p Linger --value 2>/dev/null | grep -q yes; then
+    # $USER is not set in every environment (cron, env -i, some containers).
+    local me; me="${USER:-$(id -un)}"
+    if loginctl show-user "$me" -p Linger --value 2>/dev/null | grep -q yes; then
       ok "Lingering already enabled — it will run without you logged in"
-    elif loginctl enable-linger "$USER" >/dev/null 2>&1; then
+    elif loginctl enable-linger "$me" >/dev/null 2>&1; then
       ok "Lingering enabled — it will run without you logged in"
     else
       warn "Could not enable lingering. The service will stop when you log out."
-      say  "  To fix: ${B}sudo loginctl enable-linger $USER${R}"
+      say  "  To fix: ${B}sudo loginctl enable-linger $me${R}"
     fi
   fi
   sleep 2
@@ -491,7 +526,7 @@ do_install() {
   if [ "$NO_SERVICE" = "1" ]; then
     say ""
     ok "Installed. Start it with:"
-    say "    BT_DATA_DIR='$DATA_DIR' BT_PORT=$PORT node '$APP_DIR/server.js'"
+    run_by_hand
   else
     service_add
   fi
@@ -607,7 +642,9 @@ ${B}$APP_NAME${R} — installer and service manager
   ${B}$SELF logs${R} [-f]            service log
 
 Options
-  --system            machine-wide service under a dedicated account (needs root)
+  --system            machine-wide service under a dedicated account (needs root);
+                      remembered, so later commands need not repeat it
+  --user              the per-user service, even where a --system one exists
   --port N            default $PORT
   --host ADDR         default $HOST  (127.0.0.1 keeps it off the network)
   --branch NAME       default $DEFAULT_BRANCH
@@ -626,41 +663,68 @@ USAGE
 
 # -------------------------------------------------------------------- parse --
 
+# Every option that takes a value has to be given one. Without this check a
+# trailing --port ends the script with "$2: unbound variable" (set -u), and
+# "--port --host x" quietly takes "--host" as the port.
+need_value() {
+  if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value  (try --help)"; fi
+  case "$2" in -*) die "$1 needs a value, but got $2  (try --help)" ;; esac
+}
+
+# A relative --dir or --data would be written into the unit as is, and the
+# service does not start from the directory you ran this in.
+absolute() {
+  case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s\n' "$PWD/$1" ;; esac
+}
+
 ACTION=""
 SUBACTION=""
+SHOW_HELP=0
+MODE_SET=0
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|update|uninstall|status|start|stop|restart|logs|doctor) ACTION="$1"; shift ;;
+    install|update|uninstall|status|start|stop|restart|logs) ACTION="$1"; shift ;;
     service) ACTION="service"; shift; SUBACTION="${1:-}"; [ $# -gt 0 ] && shift ;;
-    --system) MODE="system"; shift ;;
-    --user)   MODE="user"; shift ;;
-    --port)   PORT="$2"; PORT_SET=1; shift 2 ;;
-    --host)   HOST="$2"; HOST_SET=1; shift 2 ;;
-    --branch) BRANCH="$2"; shift 2 ;;
-    --dir)    APP_DIR="$2"; DIR_SET=1; shift 2 ;;
-    --data)   DATA_DIR="$2"; DATA_SET=1; shift 2 ;;
-    --backups) BACKUP_DIR="$2"; BACKUP_SET=1; shift 2 ;;
+    --system) MODE="system"; MODE_SET=1; shift ;;
+    --user)   MODE="user"; MODE_SET=1; shift ;;
+    --port)   need_value "$@"; PORT="$2"; PORT_SET=1; shift 2 ;;
+    --host)   need_value "$@"; HOST="$2"; HOST_SET=1; shift 2 ;;
+    --branch) need_value "$@"; BRANCH="$2"; shift 2 ;;
+    --dir)    need_value "$@"; APP_DIR="$(absolute "$2")"; DIR_SET=1; shift 2 ;;
+    --data)   need_value "$@"; DATA_DIR="$(absolute "$2")"; DATA_SET=1; shift 2 ;;
+    --backups) need_value "$@"; BACKUP_DIR="$(absolute "$2")"; BACKUP_SET=1; shift 2 ;;
     --no-service) NO_SERVICE=1; shift ;;
     --purge)  PURGE=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -f|--follow) ARGS+=("-f"); shift ;;
-    -h|--help) usage; exit 0 ;;
+    -h|--help) SHOW_HELP=1; shift ;;
     *) die "Unknown argument: $1  (try --help)" ;;
   esac
 done
 
-# A machine-wide install belongs in the machine-wide places, unless the command
-# line said otherwise.
-if [ "$MODE" = "system" ]; then
-  [ "$DIR_SET"  = 0 ] && APP_DIR="/opt/$SERVICE_NAME"
-  [ "$DATA_SET" = 0 ] && DATA_DIR="/var/lib/$SERVICE_NAME"
-  [ "$BACKUP_SET" = 0 ] && BACKUP_DIR="/var/backups/$SERVICE_NAME"
+case "$PORT" in
+  ""|*[!0-9]*) die "The port has to be a number, not \"$PORT\"." ;;
+esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "The port has to be between 1 and 65535, not $PORT."
+
+# --system is remembered too: with a machine-wide unit in place and no user
+# one, later commands act on the machine-wide one without being told again.
+# --user says otherwise.
+if [ "$MODE_SET" = 0 ] && [ ! -f "$(unit_path)" ] \
+   && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
+  MODE="system"
 fi
 
-# Snapshots live beside the data they protect, so moving the data moves them.
-if [ "$BACKUP_SET" = 0 ] && [ "$DATA_SET" = 1 ]; then
-  BACKUP_DIR="$(cd "$(dirname "$DATA_DIR")" 2>/dev/null && pwd || dirname "$DATA_DIR")/backups"
+# The defaults for this mode, before anything on the command line or in the
+# unit; the snapshot directory below needs to know whether the data moved.
+if [ "$MODE" = "system" ]; then
+  default_data="/var/lib/$SERVICE_NAME"
+  [ "$DIR_SET"  = 0 ] && APP_DIR="/opt/$SERVICE_NAME"
+  [ "$DATA_SET" = 0 ] && DATA_DIR="$default_data"
+  [ "$BACKUP_SET" = 0 ] && BACKUP_DIR="/var/backups/$SERVICE_NAME"
+else
+  default_data="$data_home/$SERVICE_NAME/data"
 fi
 
 # Once a unit exists it is the record of where things went and on what port, so
@@ -671,13 +735,34 @@ load_unit_settings() {
   local unit; unit="$(unit_path)"
   [ -f "$unit" ] || return 0
   local v
-  v="$(sed -n 's/^Environment=BT_PORT=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
-  v="$(sed -n 's/^Environment=BT_HOST=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
-  v="$(sed -n 's/^Environment=BT_DATA_DIR=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
-  v="$(sed -n 's/^WorkingDirectory=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+  v="$(unit_env "$unit" BT_PORT)";     [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
+  v="$(unit_env "$unit" BT_HOST)";     [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
+  v="$(unit_env "$unit" BT_DATA_DIR)"; [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
+  v="$(unit_workdir "$unit")";         [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
   return 0
 }
 load_unit_settings
+
+# Snapshots live beside the data they protect, so moving the data moves them -
+# whether it moved on this command line or at install time, which is why this
+# comes after the unit is read. A data directory called "data" gets a
+# "backups" next to it, as the default layout has; anything else gets
+# "<name>-backups", so --data ~/baby does not snapshot into a vague ~/backups.
+if [ "$BACKUP_SET" = 0 ] && [ "$DATA_DIR" != "$default_data" ]; then
+  case "$(basename "$DATA_DIR")" in
+    data) BACKUP_DIR="$(dirname "$DATA_DIR")/backups" ;;
+    *)    BACKUP_DIR="${DATA_DIR%/}-backups" ;;
+  esac
+fi
+
+# Piped from curl, $0 is "bash" and there is no script file in the current
+# directory, so the hints name the copy that install puts in the app directory.
+case "${0##*/}" in
+  bash|sh|-bash|-sh|"") SELF="$(sh_word "$APP_DIR/scripts/install.sh")" ;;
+  *) SELF="$0" ;;
+esac
+
+if [ "$SHOW_HELP" = 1 ]; then usage; exit 0; fi
 
 case "${ACTION:-}" in
   install|update|uninstall) check_layout ;;
