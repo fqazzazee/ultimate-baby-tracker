@@ -8,6 +8,9 @@ import {
 } from './core.js';
 import { api, subscribe } from './api.js';
 import * as sound from './sound.js';
+import {
+  registerWorker, showAlarm, requestPermission, notifyState, permissionText,
+} from './notify.js';
 import { $, esc, store, fmtClock, fmtSpan, babyAge, ringState } from './util.js';
 import { toneStyle, typeOf } from './ui.js';
 import {
@@ -225,16 +228,11 @@ function startRing(inst) {
   sound.startRinging();
   sound.buzz([200, 120, 200, 120, 400]);
   showRingOverlay(inst);
-  if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && notified !== inst.key) {
+  if (document.hidden && notifyState() === 'granted' && notified !== inst.key) {
     notified = inst.key;
-    try {
-      const n = new Notification(`${inst.emoji} ${inst.label}`, {
-        body: `${inst.babyName} — it's time.`,
-        tag: inst.key,
-        requireInteraction: true,
-      });
-      n.onclick = () => { window.focus(); n.close(); };
-    } catch { /* notifications unavailable */ }
+    // Through the service worker where there is one (Android insists), and
+    // the plain constructor otherwise; see notify.js. It logs its own failures.
+    showAlarm(`${inst.emoji} ${inst.label}`, { body: `${inst.babyName} — it's time.`, tag: inst.key });
   }
 }
 
@@ -497,9 +495,7 @@ const ACTIONS = {
       const insts = (state.data?.alarms || []).filter((i) => i.alarmId === el.dataset.id);
       return Promise.all(insts.map((i) => api.armAlarm(i.key))).then(refresh);
     });
-    if (on && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
+    if (on && notifyState() === 'default') requestPermission().then(render);
     sound.play(on ? 'success' : 'undo');
   },
   'snooze-alarm': async (el) => {
@@ -516,9 +512,9 @@ const ACTIONS = {
     await refresh();
   },
   'ask-notify': async () => {
-    if (!('Notification' in window)) return toast({ icon: '🔕', text: 'This browser has no notifications', tone: 'peach' });
-    const res = await Notification.requestPermission();
-    toast({ icon: res === 'granted' ? '🔔' : '🔕', text: `Notifications ${res}`, tone: res === 'granted' ? 'mint' : 'peach' });
+    const res = await requestPermission();
+    const on = res === 'granted';
+    toast({ icon: on ? '🔔' : '🔕', text: esc(permissionText(res)), tone: on ? 'mint' : 'peach' });
     render();
   },
 };
@@ -558,6 +554,7 @@ function ensureProfileUnlocked() {
 async function boot() {
   setRenderer(renderAll);
   setUnlocker(unlockProfile);
+  registerWorker();
   applyTheme('auto');
   onRefresh(() => (state.tab === 'stats' ? loadStats() : null));
   onRefresh(() => (state.tab === 'track' ? loadNutrition() : null));

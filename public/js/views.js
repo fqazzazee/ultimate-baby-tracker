@@ -18,6 +18,7 @@ import {
   supportsSides, readSession, elapsed, nextSide, sidesLine, OTHER,
 } from './feeding.js';
 import { unitSystem, displayUnit, toDisplay, decimalsFor, fmtQty, perWeight } from './units.js';
+import { notifyNotice } from './notify.js';
 
 /* --------------------------------------------------------------- utilities */
 
@@ -658,9 +659,10 @@ export function renderAlarms() {
       <button class="btn primary wide" data-act="add-alarm" style="margin-top:8px">➕ New alarm</button>
       <p class="small muted" style="margin-top:14px;text-align:center">
         Alarms ring in any open tab. Allow notifications to be nudged when the app is in the background.
+        A phone pauses a page it is not showing, though: with the screen locked
+        or another app in front, an alarm cannot ring or notify until you come back.
       </p>
-      ${'Notification' in window && Notification.permission !== 'granted'
-        ? '<button class="btn wide" data-act="ask-notify">🔔 Enable notifications</button>' : ''}
+      ${notifyNotice()}
     </div>`;
 }
 
