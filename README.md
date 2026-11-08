@@ -8,10 +8,11 @@
 
 
 One-tap tracking for a newborn: feeds, diapers, sleep, baths, medicine, and
-anything else you care to invent. Renders and works on modern web browsers from your notebook, 
-workstation and phone.
+anything else you care to invent. Works in any modern browser, on a laptop, a
+desktop or a phone.
 
-**Self-hosted**, **offline**, No accounts, no cloud, no build step, no dependencies. Your entries stay on your
+**Self-hosted** and **local**: it needs no internet connection, and has no
+accounts, no cloud, no build step and no dependencies. Your entries stay on your
 machine as plain text you can read.
 
 ## Preview - Mobile Phone View
@@ -48,7 +49,7 @@ it from.
 
 | | Browser | Installable app |
 | --- | --- | --- |
-| **Desktop · laptop** | any modern browser | Chrome and Edge can install the page as an app |
+| **Desktop · laptop** | any modern browser | Chrome and Edge can install the page as an app when it is opened from `localhost` or over HTTPS |
 | **Android** | Chrome — the layout is built for the phone | **not yet** |
 | **iPhone · iPad** | Safari — the layout is built for the phone | **not yet** |
 
@@ -68,9 +69,20 @@ you open it.
 
 ## Install
 
-Node 18 or newer is the only prerequisite.
-*(Fedora: `sudo dnf install nodejs` · Debian/Ubuntu: `sudo apt install nodejs` ·
-macOS: `brew install node` · Windows: `winget install OpenJS.NodeJS.LTS`)*
+Node 18 or newer is the only prerequisite, plus git if you clone the repository.
+
+| | Node | git |
+| --- | --- | --- |
+| **Fedora** | `sudo dnf install nodejs` | `sudo dnf install git` |
+| **Debian 12+ · Ubuntu 24.04+** | `sudo apt install nodejs` | `sudo apt install git` |
+| **Older Debian · Ubuntu** | their `nodejs` package is too old (Node 12) — use [nodejs.org](https://nodejs.org/en/download) or [NodeSource](https://github.com/nodesource/distributions) | `sudo apt install git` |
+| **macOS** | the **macOS Installer (.pkg)** from [nodejs.org](https://nodejs.org/en/download) — or `brew install node` if you already use [Homebrew](https://brew.sh) | `xcode-select --install` |
+| **Windows** | `winget install OpenJS.NodeJS.LTS` | `winget install Git.Git` |
+
+**On a Mac, neither Homebrew nor git is there out of the box.** The `git` that
+macOS ships is a placeholder that only offers to install Apple's Command Line
+Tools, so run `xcode-select --install` once and let it finish before either of
+the commands below. Check with `node --version` and `git --version`.
 
 ### Linux and macOS
 
@@ -88,6 +100,9 @@ curl -fsSL https://raw.githubusercontent.com/fqazzazee/ultimate-baby-tracker/mai
 
 On Linux that sets it up as a background service that starts with your machine.
 **No `sudo`, no root** — it is a systemd *user* service.
+
+On macOS there is no service yet: the install finishes by printing the command
+that starts the server. It runs for as long as that terminal window stays open.
 
 ### Windows
 
@@ -130,7 +145,7 @@ Same three commands on either platform — `install.sh` on Linux and macOS,
 | | |
 | --- | --- |
 | `status` | where it is installed, and whether it is running |
-| `update` | pull the newest version and restart |
+| `update` | pull the newest version, and restart the service if there is one |
 | `uninstall` | remove it; add `--purge` / `-Purge` to drop your entries too |
 
 Your entries live outside the application folder and are snapshotted before
@@ -142,14 +157,15 @@ every update, so updating cannot touch them.
 | --- | --- |
 | **Track** | One tap per event. Breastfeeds and sleeps are timers, and a breastfeed times each side separately — switch with one tap, and the card tells you which breast to start on next. A toast offers Undo for a few seconds after every tap. |
 | **History** | Everything logged, grouped by day, filterable, editable. Exports to CSV. |
-| **Stats** | Intake, feeds, diapers, sleep, pumping, nursing by side and nutrients over 1–90 days, with the figures a check-up asks for. Buttons you invent are charted too, from the fields you gave them. Pick which charts you want; each downloads as an image. |
-| **Alarms** | "Tell me if she hasn't fed in three hours." Rings on time, even in a background tab. |
-| **Setup** | Babies, people, which metrics to track and in what order, which milks to offer, which charts to draw, custom buttons, backup and restore, and backups on a schedule. |
+| **Stats** | Intake, feeds, diapers, sleep, pumping, nursing by side and nutrients over 1–90 days, with the figures a check-up asks for. Buttons you invent are charted too, from the fields you gave them. Pick which charts you want; each downloads as an image, or **📋 Report** puts as many as you like into one printable file. |
+| **Alarms** | "Tell me if she hasn't fed in three hours." Rings on time while the page is open; allow notifications and a desktop browser nudges you from a background tab too. |
+| **Setup** | Babies, people, metric or US measurements, which metrics to track and in what order, which milks to offer, which charts to draw, custom buttons, backup and restore, and backups on a schedule. |
 
 Also: multiple babies and multiple carers (every entry records who did it),
 optional 4-digit profile PINs, nutrition worked out from the cc you already log
-over a rolling 24 hours to a month,
-light and dark themes, and spacing that grows with your system text size.
+over a rolling 24 hours to a month, metric or US units (ml/fl oz, kg/lb, cm/in,
+°C/°F) with unit pairs of your own, light and dark themes, and spacing that
+grows with your system text size.
 
 ## Where your data goes
 
@@ -160,6 +176,7 @@ config.json    babies, people, buttons, alarms, milk profiles, settings
 events.log     one JSON object per line, append-only
 timers.json    timers currently running
 alarms.json    snooze / last-fired state
+backup-state.json   when the last automatic backup ran
 backups/       automatic backups, once you switch them on
 ```
 
@@ -174,12 +191,13 @@ than a second copy of a disk that can fail once.
 
 ## Read more
 
-- **[Manual](docs/manual.md)** — how to use manual that includes setting up the screen,
-  nutrition, statistics, custom, buttons, backup and restore, the HTTP API
+- **[Manual](docs/manual.md)** — how to use it: the Track screen, nutrition,
+  statistics and the printable report, metric/US units, custom buttons, alarms,
+  backup and restore, and the HTTP API
 - **[Installing](docs/install.md)** — every installer flag, the service on each
   platform, what an update does
 - **[Security](SECURITY.md)** — **read this before exposing it to anything**
-- **[Changelog](CHANGELOG.md)** — **version changes**
+- **[Changelog](CHANGELOG.md)** — what changed in each release
 - **[Website and live demo](https://ultimate-baby-tracker.safeqbit.com)** — the
   app running in a browser, and the manual and FAQ as searchable pages
 

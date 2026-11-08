@@ -40,14 +40,17 @@ seconds afterwards, so a mis-tap costs nothing.
   the single column.
 
 **History** — everything logged, grouped by day, filterable by type, with daily
-totals. Tap any entry to edit or delete it. Exports to CSV.
+totals. Tap any entry to edit or delete it. Exports to CSV: the current baby's
+entries, with the columns `when, baby, who, what, preset, amount, amount_unit,
+duration_min, details, note`.
 
 **Stats** — see [Statistics](#statistics).
 
 **Alarms** — see below.
 
-**Setup** — babies, people, tracked metrics and their order, nutrition,
-statistics, automatic backups, theme and sound, plus an **About** card at the bottom with the version, links back to this repository and
+**Setup** — babies, people, measurements (metric or US), tracked metrics and
+their order, nutrition, statistics and charts from your own buttons, look and
+feel, data, automatic backups, theme and sound, plus an **About** card at the bottom with the version, links back to this repository and
 the docs, and a reminder of the security posture above.
 
 ## Growth, medicines and vitamins
@@ -65,8 +68,9 @@ circumference is off — a figure a doctor watches rather than one for a home
 screen — and **Setup → Charts from your own buttons** switches it on.
 
 Fields are in kilograms and centimetres, matching the growth references everyone
-compares against. Both are editable; for pounds and ounces, open the Weight
-field, set the unit to `lb` and give it a smaller unit of 16 ounces.
+compares against. To read them in pounds and inches, switch
+**Setup → Measurements** to US — see [Metric or US](#metric-or-us). What is
+stored stays in kg and cm.
 
 **Medicine** offers the ones a baby is commonly given at home — vitamin D, iron,
 a multivitamin, a probiotic, paracetamol, ibuprofen, simethicone, saline drops,
@@ -111,7 +115,7 @@ are minutes.
 
 ### Units of your own
 
-Five pairs are built in: `cc` and `ml` ⇄ *fl oz*, `kg` ⇄ *lb*, `cm` ⇄ *in*,
+Five units are built in: `cc` and `ml` ⇄ *fl oz*, `kg` ⇄ *lb*, `cm` ⇄ *in*,
 `°C` ⇄ *°F*. Any other unit is shown exactly as it was typed, in both systems —
 until you declare a pair for it.
 
@@ -124,8 +128,8 @@ until you declare a pair for it.
 | **How many make one** | `28.349523125` grams to the ounce |
 | **Decimals** | how precisely each side is shown, which also sets how big a step the − and + buttons take |
 
-Grams and ounces, kilometres and miles, millilitres and teaspoons are offered as
-one-tap starting points, and everything stays editable afterwards. A worked
+Grams and ounces, metres and feet, millimetres and inches, kilometres and miles,
+and litres and gallons are offered as one-tap starting points, and everything stays editable afterwards. A worked
 example under the form reads back as you type — *100 g = 3.53 oz* — which is
 what catches a factor entered upside down.
 
@@ -317,7 +321,7 @@ pale to read as data.
 The reference lines on the nutrient charts are references, not targets: for the
 first six months most are Adequate Intakes, the observed average of exclusively
 breastfed infants. A formula-fed baby will sit well above the iron line by
-design. Tap any tile on **Nutrition today** for the whole story.
+design. Tap any tile on the **Nutrition** card on Track for the whole story.
 
 None of it is a diagnosis, and a reference note under a chart is not a target to
 hit. It is your own log, added up.
@@ -331,7 +335,7 @@ It asks three things before it builds anything:
 
 | | |
 |---|---|
-| **Range** | Its own, independent of what the screen is set to — 1 to 90 days |
+| **Range** | Its own, independent of what the screen is set to — 1, 3, 7, 14, 30 or 90 days |
 | **Measurements** | Its own too, so a household that types in millilitres can hand over a report in fluid ounces without changing the app |
 | **Which charts** | Everything the range actually has data for, listed and ticked. The ones your Setup switches already show arrive ticked; the rest are there to add |
 
@@ -366,17 +370,23 @@ Three kinds, each configurable per baby:
 | **Every** | Fixed cadence regardless of activity. | Pumping every 2 hours |
 | **At time** | Wall-clock times, e.g. `08:00` and `20:00`. | Vitamin D, medication |
 
-When one fires you get a full-screen card with three choices: **log it now**
-(which records the event and resets the alarm), **snooze**, or **dismiss**.
-Quiet hours keep it silent overnight. Allow notifications and it will nudge you
-even when the tab is in the background.
+When one fires you get a full-screen card with **snooze** and **dismiss**, plus
+**log it now** when the alarm watches a button (which records the event and
+resets the alarm). Quiet hours keep it silent overnight.
+
+**It rings in the browser, so a page has to be open.** Allow notifications and a
+desktop browser will also show one while the tab is in the background. Phones
+suspend background tabs, so on a phone keep the app on screen if you are
+relying on it, and browsers only allow notifications over HTTPS or from
+`localhost` — see [SECURITY.md](../SECURITY.md#putting-it-behind-a-proxy).
+At-time alarms take 24-hour times, `20:00` rather than `8:00 PM`.
 
 The countdown is computed by the server but evaluated in the browser every
 second, so an alarm rings on time rather than at the next poll.
 
 ## Custom buttons
 
-Setup → Buttons → **New button** builds a tracked event from scratch:
+**Setup → Tracked metrics → ➕ New button** builds a tracked event from scratch:
 
 - **Fields** to record — number (with a unit like `cc` or `°C`), text, choice,
   yes/no, colour swatches, or duration. A field can be conditional on another,
@@ -442,7 +452,7 @@ in the same format.
 The server checks every quarter of an hour and writes one when it is due, whether
 or not anybody has the page open — no cron entry, no systemd timer, nothing to
 install. The file is byte-for-byte the same kind of bundle the download button
-produces, so either restores anywhere, including onto the Android build.
+produces, so either one restores anywhere.
 
 | | |
 | --- | --- |
@@ -472,6 +482,9 @@ curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430.json.gz \
 
 ## Where the data lives
 
+Everything is in one folder, `data/` beside where the server was started unless
+`BT_DATA_DIR` says otherwise:
+
 ```
 data/
 ├── config.json    babies, people, buttons, alarms, milk profiles, settings
@@ -479,6 +492,7 @@ data/
 ├── timers.json    timers currently running
 ├── alarms.json    snooze / last-fired state
 ├── backup-state.json   when the last automatic backup ran, and whether it worked
+├── pre-restore-<time>.json   what was there before the last restore
 └── backups/       automatic backups, when they are switched on
 ```
 
@@ -495,14 +509,18 @@ simplest backup there is.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/state?babyId=&days=` | Everything the UI needs in one call |
+| `GET` | `/api/state?babyId=&days=` | Everything the UI needs in one call; `days` is 1–90, default 7 |
 | `GET` | `/api/stream` | Server-sent events; pushes on every change |
-| `GET` | `/api/events`, `POST /api/events` | List / create entries |
+| `GET` | `/api/events?babyId=&typeId=&since=&limit=` | List entries (`limit` defaults to 500) |
+| `POST` | `/api/events` | Create an entry — `typeId` and `babyId` required; answers `201 {event, rev}` |
 | `PATCH`/`DELETE` | `/api/events/:id` | Edit / remove an entry |
 | `PUT` | `/api/config` | Replace the whole config |
-| `POST` | `/api/timers`, `/api/timers/:id/stop` | Start / stop a timer |
-| `POST` | `/api/alarms/:key/{snooze,dismiss,arm}` | Alarm control |
-| `POST` | `/api/users/:id/{verify,pin}` | Check a profile PIN / set or clear one |
+| `GET` | `/api/timers` | Timers currently running |
+| `POST` | `/api/timers`, `/api/timers/:id/stop` | Start / stop a timer (stopping logs the entry) |
+| `DELETE` | `/api/timers/:id` | Cancel a timer without logging anything |
+| `GET` | `/api/alarms` | Every alarm, with when it is next due |
+| `POST` | `/api/alarms/:key/{snooze,dismiss,arm}` | Alarm control — snooze takes `{minutes}` (default 10), dismiss takes `{dueAt}` |
+| `POST` | `/api/users/:id/{verify,pin}` | Check a profile PIN (`{pin}` → `{ok}`, or `{ok:false, retryAfter}` when locked out) / set or clear one (`{pin, currentPin}`) |
 | `GET` | `/api/export.csv?babyId=` | Spreadsheet export |
 | `GET` | `/api/backup` | Gzipped bundle of everything |
 | `GET` | `/api/backup/auto` | Where automatic backups go, and when the last one ran |
