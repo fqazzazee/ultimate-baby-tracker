@@ -266,7 +266,7 @@ function Assert-Layout {
   if ($Action -eq 'install') {
     $fix = "Pick one outside it, e.g. -Data `"$(Join-Path (Split-Path $AppDir -Parent) 'data')`"."
   } else {
-    $fix = "Copy that folder somewhere outside $AppDir first, point the task at the copy`n  with: .\install.cmd service add -Data <new path>`n  and then run this again."
+    $fix = "Copy that folder somewhere outside $AppDir first, point the task at the copy`n  with: $(Get-LauncherHint) service add -Data <new path>`n  and then run this again."
   }
   if (Test-Within $DataDir $AppDir) {
     Die "The data directory $DataDir is inside the application directory $AppDir.`n  Updating replaces that directory and uninstalling deletes it, so your entries`n  would go with it. $fix"
@@ -647,8 +647,32 @@ function Show-Where {
       if ($ip) { Say "    On your phone: http://${ip}:$Port" }
     }
   } else {
-    Warn "Not running. See: .\install.cmd logs"
+    Warn "Not running. See: $(Get-LauncherHint) logs"
   }
+}
+
+# A PowerShell single-quoted string; only ' itself needs escaping, by doubling.
+function ConvertTo-PSLiteral {
+  param([string]$Text)
+  return "'" + $Text.Replace("'", "''") + "'"
+}
+
+# How to run this installer again later. The copy inside the app directory is
+# the one to name: after the irm one-liner there is no install.cmd in the
+# current directory at all, and every update keeps that copy current.
+function Get-LauncherHint {
+  $installed = Join-Path (Join-Path (Get-FullPath $AppDir) 'scripts') 'install.cmd'
+  if (-not (Test-Path $installed)) { return '.\install.cmd' }
+  return "& $(ConvertTo-PSLiteral $installed)"
+}
+
+# The command that runs the server in this console with the settings the task
+# would use - all three of them, or -Listen 127.0.0.1 would quietly become
+# 0.0.0.0 and put it on the network.
+function Get-StartHint {
+  $vars = "`$env:BT_DATA_DIR=$(ConvertTo-PSLiteral (Get-FullPath $DataDir)); " +
+          "`$env:BT_PORT=$Port; `$env:BT_HOST=$(ConvertTo-PSLiteral $Listen)"
+  return "$vars; node $(ConvertTo-PSLiteral (Join-Path (Get-FullPath $AppDir) 'server.js'))"
 }
 
 # ------------------------------------------------------------------ actions --
@@ -665,14 +689,14 @@ function Invoke-Install {
   if ($NoService) {
     Say ''
     Ok 'Installed. Start it with:'
-    Say "    `$env:BT_DATA_DIR='$DataDir'; `$env:BT_PORT=$Port; node '$(Join-Path $AppDir 'server.js')'"
+    Say "    $(Get-StartHint)"
   } else {
     Add-Service
   }
   Say ''
   Say "  app  $AppDir"
   Say "  data $DataDir"
-  Say "  update later with: .\install.cmd update"
+  Say "  update later with: $(Get-LauncherHint) update"
 }
 
 function Invoke-Update {
@@ -717,7 +741,8 @@ function Invoke-Update {
         Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
       } else {
-        Warn 'It was not started by the logon task, so start it again the way you started it.'
+        Warn 'It was not started by the logon task, so start it again yourself:'
+        Say "    $(Get-StartHint)"
       }
     }
   }
@@ -745,10 +770,21 @@ function Invoke-Uninstall {
     Die "$DataDir has no config.json or events.log, so it does not look like the`n  tracker's data directory. Not deleting it."
   }
   Remove-Service
-  if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force; Ok "Removed $AppDir" }
+  if (Test-Path $AppDir) {
+    Remove-Item $AppDir -Recurse -Force -ErrorAction SilentlyContinue
+    # Checked rather than assumed: a file held open by another program - an
+    # editor, an Explorer window, a node that would not die - keeps part of it.
+    if (Test-Path $AppDir) {
+      Die "Could not remove all of $AppDir; something is still using it.`n  The task is already gone, so close whatever has it open and delete the rest by hand."
+    }
+    Ok "Removed $AppDir"
+  }
   if ($Purge) {
     Backup-Data
     Remove-Item $DataDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $DataDir) {
+      Die "Could not remove all of $DataDir; something is still using it.`n  What is left is still there, and a snapshot is in $BackupDir."
+    }
     Warn "Removed $DataDir - the snapshot in $BackupDir is all that is left."
   } else {
     Ok "Kept your entries in $DataDir (pass -Purge to delete them too)"
