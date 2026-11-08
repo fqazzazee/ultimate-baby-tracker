@@ -5,6 +5,26 @@ and the version in `package.json` is what the header and the About card display.
 
 ## Unreleased
 
+### Fixed
+
+- **The installers no longer delete a directory that is not theirs.** Pointing
+  `--dir` (`-Dir` on Windows) at a folder that already held anything other than
+  the app — `~/Documents`, say — used to wipe it. Now they refuse, and refuse
+  outright to use your home directory or anything above it. A new copy is
+  fetched beside the old one and swapped in only once it is complete, so a
+  failed clone or download leaves the existing install alone. (#27)
+- **Entries can no longer be inside the application directory.** A data or
+  snapshot directory inside `--dir` was deleted by `uninstall` (even without
+  `--purge`) and by an update; the installers now refuse that layout and, for
+  an existing install, say how to move the data out first. `uninstall` also
+  checks that what it is about to delete is the app and, with `--purge`, the
+  data, before it touches the service. (#28)
+- **A malformed request no longer stops the server.** A stray `%` in a URL or
+  an odd `Host` header threw outside any handler and ended the process; it is
+  now answered with 400. (#38)
+- Installing or updating without git no longer ends with *"tmp: unbound
+  variable"* and exit code 1. (#34)
+
 ### Docs
 
 - **The install instructions now work on a fresh Mac.** They no longer assume

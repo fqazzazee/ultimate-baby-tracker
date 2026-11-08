@@ -128,6 +128,12 @@ launcher in case the Node path moved, and starts it again — then prints the
 commits it pulled in. The app directory is not for your own edits: an update
 replaces whatever is there.
 
+The installers check the layout before they touch anything. They will not
+install into a directory that already holds something other than the app, will
+not use your home directory or anything above it, and will not accept a data or
+snapshot directory inside the application directory — the one place an update
+or an uninstall would reach.
+
 Where git is installed the app is a shallow clone, so updating is a fetch and
 you can see exactly what changed. Where it is not, the installer falls back to
 downloading the branch archive and says that updates will re-download the lot.

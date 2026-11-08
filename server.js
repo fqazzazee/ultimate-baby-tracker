@@ -398,7 +398,12 @@ async function handleAPI(req, res, url) {
 }
 
 function serveStatic(req, res, url) {
-  let rel = decodeURIComponent(url.pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch {
+    return send(res, 400, 'Bad request'); // a stray %, or a broken UTF-8 sequence
+  }
   if (rel === '/') rel = '/index.html';
   const file = path.join(PUBLIC_DIR, rel);
   // Refuse anything that escapes public/.
@@ -415,7 +420,15 @@ function serveStatic(req, res, url) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  // Only the path and query are ever read, so the base is fixed rather than
+  // built from the Host header - a header like 'a b' made new URL() throw here,
+  // outside any handler, and took the whole server down with it.
+  let url;
+  try {
+    url = new URL(req.url, 'http://localhost');
+  } catch {
+    return send(res, 400, 'Bad request');
+  }
   if (url.pathname.startsWith('/api/')) {
     handleAPI(req, res, url).catch((err) => {
       console.error('[api]', err);
@@ -424,7 +437,12 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
-  serveStatic(req, res, url);
+  try {
+    serveStatic(req, res, url);
+  } catch (err) {
+    console.error('[static]', err);
+    if (!res.headersSent) send(res, 500, 'Server error');
+  }
 });
 
 server.on('error', (err) => {
