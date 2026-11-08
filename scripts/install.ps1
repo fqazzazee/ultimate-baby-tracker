@@ -302,9 +302,12 @@ function Get-Source {
   Assert-Replaceable $Dest
   if (Test-Path (Join-Path $Dest '.git')) {
     Step 'Updating the existing checkout'
+    # The refspec is spelled out because the checkout is a shallow clone of a
+    # single branch: a bare 'fetch origin dev' fetches dev but records no
+    # origin/dev, and the checkout below then fails with "not a commit".
     $steps = @(
       @('remote', 'set-url', 'origin', $RepoUrl),
-      @('fetch', '--depth', '1', 'origin', $Branch),
+      @('fetch', '--depth', '1', 'origin', "+refs/heads/${Branch}:refs/remotes/origin/$Branch"),
       @('checkout', '-q', '-B', $Branch, "origin/$Branch"),
       @('reset', '--hard', '-q', "origin/$Branch")
     )
