@@ -385,10 +385,13 @@ async function handleAPI(req, res, url) {
         return sendJSON(res, 200, { ok: true, rev: store.getRevision() });
       }
       if (action === 'dismiss') {
+        // `lastCycleAt` is left alone. It is the base an "Every" alarm counts
+        // from, and moving it to the moment of dismissal made a 2-hourly alarm
+        // drift later by however long each ring took to answer - not the fixed
+        // cadence it promises. `dismissedForDueAt` is what stops the ring.
         store.setAlarmState(key, {
           dismissedForDueAt: body.dueAt || null,
           snoozedUntil: null,
-          lastCycleAt: new Date().toISOString(),
         });
         return sendJSON(res, 200, { ok: true, rev: store.getRevision() });
       }
