@@ -126,11 +126,13 @@ export function chartableMetrics(type) {
       // Counted separately there is no such problem - each is one series in the
       // first slot - and two of them can still pair through the combine switch,
       // because both are counts of the same thing.
+      const seen = new Set();
       for (const o of f.options || []) {
         const name = typeof o === 'string' ? o : o?.name;
-        if (!name) continue;
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
         out.push({
-          key: optionKey(f.key, name),
+          key: optionKey(f.key, name, f.options),
           label: `${f.label}: ${name}`,
           kind: 'option',
           unit: '',
@@ -150,10 +152,41 @@ export function chartableMetrics(type) {
  * Slugged rather than used raw, because the key becomes a path segment in
  * `stats.buttons.<typeId>.<key>` and a dot in "Vit. D" would silently nest an
  * object where a boolean belongs.
+ *
+ * The slug keeps only a-z and 0-9, so on its own it is not unique: "左" and
+ * "右", "💧" and "💩", "Left" and "Left!" all slug alike, and options that
+ * share a key share a count, a Setup switch and a DOM id. When `options` (the
+ * field's whole list) is passed, every option whose slug is taken by another
+ * gets a short hash of its own name appended - except the one that sorts first
+ * by name, which keeps the bare slug. That keeps every key that was already
+ * unique, which is every Latin-script option anybody has, exactly as it was, so
+ * nobody's chart switches reset; and it does not depend on the order the
+ * options are listed in, so dragging them about in Setup moves nothing.
  */
-export function optionKey(fieldKey, option) {
-  const slug = String(option).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `opt_${fieldKey}_${slug || 'x'}`;
+export function optionKey(fieldKey, option, options = null) {
+  const slug = optionSlug(option);
+  const key = `opt_${fieldKey}_${slug}`;
+  if (!Array.isArray(options)) return key;
+  const rivals = [...new Set(options
+    .map((o) => (typeof o === 'string' ? o : o?.name))
+    .filter((name) => name && optionSlug(name) === slug))].sort();
+  if (rivals.length < 2 || rivals[0] === String(option)) return key;
+  // An underscore, which no slug contains, so this can never land on another
+  // option's bare key.
+  return `${key}_${shortHash(String(option))}`;
+}
+
+const optionSlug = (option) => String(option).toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
+
+/** FNV-1a over UTF-16 units, base 36: short, stable, and dot-free. */
+function shortHash(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
 }
 
 /** Aggregations a number can be charted by, and what each is for. */
