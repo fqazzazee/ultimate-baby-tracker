@@ -14,7 +14,8 @@
 #
 # On Linux this installs a *user* systemd unit, which needs no root at all.
 # Pass --system to install a machine-wide unit instead (that one does need
-# root, and runs under its own unprivileged account).
+# root, and runs under its own unprivileged account). On macOS it installs a
+# per-user LaunchAgent, which needs no root either.
 #
 # Your entries live outside the application directory, so an update can never
 # touch them, and every update snapshots them first anyway.
@@ -44,6 +45,10 @@ APP_DIR="$data_home/$SERVICE_NAME/app"
 DATA_DIR="$data_home/$SERVICE_NAME/data"
 BACKUP_DIR="$data_home/$SERVICE_NAME/backups"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+# macOS: launchd has no journal for a LaunchAgent, so its output goes to a file.
+LABEL="com.github.fqazzazee.$SERVICE_NAME"
+AGENT_DIR="$HOME/Library/LaunchAgents"
+LOG_FILE="$data_home/$SERVICE_NAME/server.log"
 
 # ------------------------------------------------------------------ output --
 
@@ -91,17 +96,24 @@ check_node() {
   ok "Node $(node --version)"
 }
 
-# systemd is how a service is run on Fedora and every other mainstream distro.
-# Without it the app still runs, so say so plainly rather than refusing.
-has_systemd() {
-  [ "$(uname -s)" = "Linux" ] && have systemctl && [ -d /run/systemd/system ]
+# What runs services here: systemd on Fedora and every other mainstream
+# distro, launchd on macOS, or nothing (a container, WSL1, a distro that went
+# its own way). Without one the app still runs, so the script says so plainly
+# rather than refusing. Worked out once, into $SVC, before any action runs.
+service_manager() {
+  case "$(uname -s)" in
+    Linux)  if have systemctl && [ -d /run/systemd/system ]; then echo systemd; return; fi ;;
+    Darwin) if have launchctl; then echo launchd; return; fi ;;
+  esac
+  echo none
 }
 
-systemctl_user() { systemctl --user "$@"; }
 sc() { if [ "$MODE" = "system" ]; then sudo systemctl "$@"; else systemctl --user "$@"; fi; }
 
+# The file that defines the service: a systemd unit or a launchd property list.
 unit_path() {
-  if [ "$MODE" = "system" ]; then echo "/etc/systemd/system/$SERVICE_NAME.service"
+  if [ "$SVC" = "launchd" ]; then echo "$AGENT_DIR/$LABEL.plist"
+  elif [ "$MODE" = "system" ]; then echo "/etc/systemd/system/$SERVICE_NAME.service"
   else echo "$UNIT_DIR/$SERVICE_NAME.service"; fi
 }
 
@@ -335,6 +347,20 @@ check_paths() {
     /tmp/*|/var/tmp/*|/dev/shm/*)
       warn "Data directory is under /tmp — your entries will not survive a reboot." ;;
   esac
+  # macOS keeps background jobs out of these folders unless they are granted
+  # Full Disk Access, so a LaunchAgent pointed at one fails with "Operation not
+  # permitted" while the same command run in Terminal works.
+  if [ "$SVC" = "launchd" ]; then
+    local d
+    for d in "$APP_DIR" "$DATA_DIR"; do
+      case "$d/" in
+        "$HOME/Documents/"*|"$HOME/Desktop/"*|"$HOME/Downloads/"*|"$HOME/Library/Mobile Documents/"*)
+          warn "$d is in a folder macOS keeps background services out of
+    (Documents, Desktop, Downloads, iCloud Drive). The service will be refused
+    access unless node is given Full Disk Access; the default location avoids this." ;;
+      esac
+    done
+  fi
 }
 
 # ------------------------------------------------------------------ backups --
@@ -450,16 +476,187 @@ UNIT
   ok "Unit written to $(unit_path)"
 }
 
+# ----------------------------------------------------------------- launchd --
+
+# On macOS the service is a per-user LaunchAgent: a property list in
+# ~/Library/LaunchAgents that launchd loads at every login (RunAtLoad) and
+# restarts whenever it stops (KeepAlive). Like the systemd user unit, it needs
+# no root. It is loaded into, and unloaded from, the logged-in user's session.
+
+xml_escape()   { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+xml_unescape() { sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'; }
+
+# One <key>…</key><string>…</string> pair out of the property list, whether it
+# is laid out the way write_launch_agent writes it or has been re-saved by
+# plutil or Xcode with each part on a line of its own.
+plist_value() {
+  tr -d '\n' < "$1" \
+    | sed -n "s|.*<key>$2</key>[[:space:]]*<string>\\([^<]*\\)</string>.*|\\1|p" | xml_unescape
+}
+
+write_launch_agent() {
+  mkdir -p "$AGENT_DIR" "$(dirname "$LOG_FILE")"
+  cat > "$(unit_path)" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(xml_escape "$(command -v node)")</string>
+    <string>$(xml_escape "$APP_DIR/server.js")</string>
+  </array>
+  <key>WorkingDirectory</key><string>$(xml_escape "$APP_DIR")</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>BT_PORT</key><string>$(xml_escape "$PORT")</string>
+    <key>BT_HOST</key><string>$(xml_escape "$HOST")</string>
+    <key>BT_DATA_DIR</key><string>$(xml_escape "$DATA_DIR")</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$(xml_escape "$LOG_FILE")</string>
+  <key>StandardErrorPath</key><string>$(xml_escape "$LOG_FILE")</string>
+</dict>
+</plist>
+PLIST
+  ok "LaunchAgent written to $(unit_path)"
+}
+
+la_domain() { echo "gui/$(id -u)"; }
+la_target() { echo "$(la_domain)/$LABEL"; }
+la_loaded() { launchctl print "$(la_target)" >/dev/null 2>&1; }
+
+# Captured rather than piped into grep -q, which can exit before launchctl has
+# finished writing and so fail the pipeline under pipefail.
+la_running() {
+  local out
+  out="$(launchctl print "$(la_target)" 2>/dev/null)" || return 1
+  case "$out" in *"state = running"*) return 0 ;; esac
+  return 1
+}
+
+la_load() {
+  # Undo any earlier `launchctl disable`, which would make the load a no-op.
+  launchctl enable "$(la_target)" >/dev/null 2>&1 || true
+  launchctl bootstrap "$(la_domain)" "$(unit_path)"
+}
+
+la_unload() {
+  la_loaded || return 0
+  launchctl bootout "$(la_target)" >/dev/null 2>&1 || true
+  # bootout can return before the job is fully gone, and loading it again in
+  # that moment fails with "Input/output error". Give it a few seconds.
+  local i=0
+  while la_loaded && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
+}
+
+# ------------------------------------------------- either service manager --
+
+# The service definition records the node path and the directories, so it is
+# rewritten on every add and update.
+service_write() {
+  case "$SVC" in
+    systemd)
+      if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
+      sc daemon-reload ;;
+    launchd) write_launch_agent ;;
+  esac
+}
+
+# "On" means the service manager is keeping it up. For launchd that is being
+# loaded, even in the seconds between a crash and the restart.
+service_running() {
+  case "$SVC" in
+    systemd) sc is-active --quiet "$SERVICE_NAME" 2>/dev/null ;;
+    launchd) la_loaded ;;
+    *) return 1 ;;
+  esac
+}
+
+service_start() {
+  case "$SVC" in
+    systemd) sc start "$SERVICE_NAME" ;;
+    launchd) if la_loaded; then launchctl kickstart "$(la_target)"; else la_load; fi ;;
+  esac
+}
+
+# Stopped until the next start - or, for the LaunchAgent, the next login.
+service_stop() {
+  case "$SVC" in
+    systemd) sc stop "$SERVICE_NAME" ;;
+    launchd) la_unload ;;
+  esac
+}
+
+service_restart() {
+  case "$SVC" in
+    systemd) sc restart "$SERVICE_NAME" ;;
+    launchd) if la_loaded; then launchctl kickstart -k "$(la_target)"; else la_load; fi ;;
+  esac
+}
+
+service_logs() {
+  local lines="$1"; shift
+  case "$SVC" in
+    systemd)
+      if [ "$MODE" = "system" ]; then sudo journalctl -u "$SERVICE_NAME" -n "$lines" "$@"
+      else journalctl --user -u "$SERVICE_NAME" -n "$lines" "$@"; fi ;;
+    launchd)
+      if [ -f "$LOG_FILE" ]; then tail -n "$lines" "$@" "$LOG_FILE"
+      else say "  (no log yet at $LOG_FILE)"; fi ;;
+  esac
+}
+
+# start, stop, restart and logs need a service to act on. Where there is none,
+# say why and what to do instead, rather than failing on a missing command.
+require_service() {
+  if [ "$SVC" = "none" ]; then
+    warn "This machine has no service manager (neither systemd nor launchd), so"
+    say  "  there is no service, and '$ACTION' does not apply. Run the tracker by hand:"
+    run_by_hand
+    exit 1
+  fi
+  [ -f "$(unit_path)" ] || die "No service is installed yet. Create it with: $SELF service add"
+}
+
 service_add() {
-  has_systemd || {
-    warn "No systemd here, so there is no service to add."
+  if [ "$SVC" = "none" ]; then
+    warn "No systemd or launchd here, so there is no service to add."
     say  "  Run it by hand instead:"
     run_by_hand
     return 0
-  }
+  fi
+  if [ "$SVC" = "launchd" ]; then
+    launch_agent_add
+  else
+    systemd_add
+  fi
+  sleep 2
+  service_status_short
+}
+
+launch_agent_add() {
+  step "Installing the LaunchAgent"
+  write_launch_agent
+  la_unload
+  if la_load; then
+    ok "Loaded; it starts again at every login"
+  else
+    # Typically over SSH with nobody logged in at the Mac: there is no GUI
+    # session to load it into. The file is in place, so the next login will.
+    warn "launchd would not load it now (usual over SSH with nobody logged in at"
+    say  "  the Mac). It is installed and starts at your next login, or run:"
+    say  "    ${B}$SELF start${R}"
+  fi
+  say  "  ${DIM}It runs while you are logged in. If this Mac restarts on its own, turn"
+  say  "  on automatic login in System Settings > Users & Groups so it comes back.${R}"
+}
+
+systemd_add() {
   step "Installing the $([ "$MODE" = system ] && echo system || echo user) service"
-  if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
-  sc daemon-reload
+  service_write
   sc enable "$SERVICE_NAME" >/dev/null 2>&1 || true
   sc restart "$SERVICE_NAME"
 
@@ -477,37 +674,55 @@ service_add() {
       say  "  To fix: ${B}sudo loginctl enable-linger $me${R}"
     fi
   fi
-  sleep 2
-  service_status_short
 }
 
 service_remove() {
-  has_systemd || { warn "No systemd here; nothing to remove."; return 0; }
-  step "Removing the service"
-  sc disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
-  if [ "$MODE" = "system" ]; then sudo rm -f "$(unit_path)"; else rm -f "$(unit_path)"; fi
-  sc daemon-reload
+  case "$SVC" in
+    none) warn "No systemd or launchd here; there is no service to remove."; return 0 ;;
+    launchd)
+      step "Removing the LaunchAgent"
+      la_unload
+      rm -f "$(unit_path)" ;;
+    systemd)
+      step "Removing the service"
+      sc disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+      if [ "$MODE" = "system" ]; then sudo rm -f "$(unit_path)"; else rm -f "$(unit_path)"; fi
+      sc daemon-reload ;;
+  esac
   ok "Service removed. The app and your data are untouched."
 }
 
-service_running() {
-  has_systemd && sc is-active --quiet "$SERVICE_NAME" 2>/dev/null
+# Whether the server process is actually up right now (rather than merely
+# being kept up, which is what service_running asks).
+service_up() {
+  case "$SVC" in
+    systemd) sc is-active --quiet "$SERVICE_NAME" 2>/dev/null ;;
+    launchd) la_running ;;
+    *) return 1 ;;
+  esac
+}
+
+# The address a phone on the same network would use. macOS has no hostname -I.
+lan_ip() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true
+  else
+    hostname -I 2>/dev/null | awk '{print $1}' || true
+  fi
 }
 
 service_status_short() {
-  if has_systemd && sc is-active --quiet "$SERVICE_NAME"; then
+  if service_up; then
     ok "Running at ${B}http://localhost:$PORT${R}"
     if [ "$HOST" = "0.0.0.0" ]; then
-      local ip
-      ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || ip=""
-      [ -n "$ip" ] && say "    On your phone: ${B}http://$ip:$PORT${R}"
+      local ip; ip="$(lan_ip)"
+      if [ -n "$ip" ]; then say "    On your phone: ${B}http://$ip:$PORT${R}"; fi
     fi
   else
     warn "Not running."
-    if has_systemd; then
+    if [ "$SVC" != "none" ] && [ -f "$(unit_path)" ]; then
       say "  ${DIM}Last few lines of the log:${R}"
-      if [ "$MODE" = "system" ]; then sudo journalctl -u "$SERVICE_NAME" -n 6 --no-pager 2>/dev/null | sed 's/^/    /'
-      else journalctl --user -u "$SERVICE_NAME" -n 6 --no-pager 2>/dev/null | sed 's/^/    /'; fi
+      service_logs 6 2>/dev/null | sed 's/^/    /' || true
     fi
   fi
 }
@@ -554,7 +769,7 @@ do_update() {
     was_running=1
     RESTART_ON_EXIT=1
     step "Stopping the service"
-    sc stop "$SERVICE_NAME"
+    service_stop
   fi
   # Taken with the service stopped, so it cannot catch a half-written file.
   snapshot_data
@@ -564,12 +779,9 @@ do_update() {
 
   # The unit pins the node path and the data directory, so rewrite it in case
   # either moved between releases.
-  if [ -f "$(unit_path)" ] && has_systemd; then
-    if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
-    sc daemon-reload
-  fi
+  if [ -f "$(unit_path)" ]; then service_write; fi
   if [ "$was_running" = "1" ]; then
-    sc start "$SERVICE_NAME"
+    service_start
     RESTART_ON_EXIT=0
     sleep 1
   fi
@@ -604,6 +816,11 @@ do_uninstall() {
   else
     ok "Nothing at $APP_DIR to remove"
   fi
+  # The LaunchAgent's log is the app's, not yours, so it goes with the app.
+  if [ "$SVC" = "launchd" ] && [ -f "$LOG_FILE" ]; then
+    rm -f "$LOG_FILE"
+    ok "Removed $LOG_FILE"
+  fi
   if [ "$PURGE" = "1" ]; then
     snapshot_data
     rm -rf "$DATA_DIR"
@@ -618,13 +835,20 @@ do_status() {
   local rev; rev="$(revision)"
   say "  app     $APP_DIR $([ "$rev" != unknown ] && echo "($rev)" || echo '')"
   say "  data    $DATA_DIR"
-  say "  version $(node -p "require('$APP_DIR/package.json').version" 2>/dev/null || echo 'not installed')"
-  say "  unit    $(unit_path)"
-  if has_systemd; then
-    say "  state   $(sc is-active "$SERVICE_NAME" 2>/dev/null || echo inactive) / $(sc is-enabled "$SERVICE_NAME" 2>/dev/null || echo disabled)"
-  else
-    say "  state   no systemd on this machine"
-  fi
+  say "  version $(node -p 'require(process.argv[1]).version' "$APP_DIR/package.json" 2>/dev/null || echo 'not installed')"
+  case "$SVC" in
+    systemd)
+      say "  unit    $(unit_path)"
+      say "  state   $(sc is-active "$SERVICE_NAME" 2>/dev/null || echo inactive) / $(sc is-enabled "$SERVICE_NAME" 2>/dev/null || echo disabled)" ;;
+    launchd)
+      say "  agent   $(unit_path)$([ -f "$(unit_path)" ] || echo ' (not installed)')"
+      say "  log     $LOG_FILE"
+      if la_running; then say "  state   running"
+      elif la_loaded; then say "  state   loaded, not running (launchd retries every few seconds)"
+      else say "  state   not loaded"; fi ;;
+    *)
+      say "  state   no service manager on this machine (neither systemd nor launchd)" ;;
+  esac
   service_status_short
 }
 
@@ -655,7 +879,9 @@ Options
   --purge             with uninstall, also delete the data directory
   -y, --yes           do not prompt
 
-A user service needs no root and survives reboots once lingering is on.
+A user service needs no root and survives reboots once lingering is on. On
+macOS the service is a LaunchAgent that runs while you are logged in, and its
+log is $LOG_FILE.
 Your entries live in the data directory, which is never inside the application
 directory, so updating cannot touch them.
 USAGE
@@ -708,10 +934,19 @@ case "$PORT" in
 esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "The port has to be between 1 and 65535, not $PORT."
 
+SVC="$(service_manager)"
+if [ "$MODE" = "system" ] && [ "$SVC" != "systemd" ]; then
+  if [ "$SVC" = "launchd" ]; then
+    die "--system is for Linux. On macOS the service is a per-user LaunchAgent,
+  which needs no root; leave --system out."
+  fi
+  die "--system needs systemd, and this machine does not have it."
+fi
+
 # --system is remembered too: with a machine-wide unit in place and no user
 # one, later commands act on the machine-wide one without being told again.
 # --user says otherwise.
-if [ "$MODE_SET" = 0 ] && [ ! -f "$(unit_path)" ] \
+if [ "$SVC" = "systemd" ] && [ "$MODE_SET" = 0 ] && [ ! -f "$(unit_path)" ] \
    && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
   MODE="system"
 fi
@@ -735,10 +970,18 @@ load_unit_settings() {
   local unit; unit="$(unit_path)"
   [ -f "$unit" ] || return 0
   local v
-  v="$(unit_env "$unit" BT_PORT)";     [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
-  v="$(unit_env "$unit" BT_HOST)";     [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
-  v="$(unit_env "$unit" BT_DATA_DIR)"; [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
-  v="$(unit_workdir "$unit")";         [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+  if [ "$SVC" = "launchd" ]; then
+    v="$(plist_value "$unit" BT_PORT)";          [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
+    v="$(plist_value "$unit" BT_HOST)";          [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
+    v="$(plist_value "$unit" BT_DATA_DIR)";      [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
+    v="$(plist_value "$unit" WorkingDirectory)"; [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+    v="$(plist_value "$unit" StandardOutPath)";  [ -n "$v" ] && LOG_FILE="$v"
+  else
+    v="$(unit_env "$unit" BT_PORT)";     [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
+    v="$(unit_env "$unit" BT_HOST)";     [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
+    v="$(unit_env "$unit" BT_DATA_DIR)"; [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
+    v="$(unit_workdir "$unit")";         [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+  fi
   return 0
 }
 load_unit_settings
@@ -781,7 +1024,7 @@ on_exit() {
   if [ "$RESTART_ON_EXIT" = "1" ]; then
     RESTART_ON_EXIT=0
     warn "The update did not finish; starting the service again."
-    if sc start "$SERVICE_NAME" >/dev/null 2>&1; then
+    if service_start >/dev/null 2>&1; then
       ok "Service started again"
     else
       warn "It would not start. See: $SELF status"
@@ -796,11 +1039,10 @@ case "${ACTION:-}" in
   update)    do_update ;;
   uninstall) do_uninstall ;;
   status)    do_status ;;
-  start)     sc start "$SERVICE_NAME"; service_status_short ;;
-  stop)      sc stop "$SERVICE_NAME"; ok "Stopped" ;;
-  restart)   sc restart "$SERVICE_NAME"; service_status_short ;;
-  logs)      if [ "$MODE" = system ]; then sudo journalctl -u "$SERVICE_NAME" -n 100 "${ARGS[@]+"${ARGS[@]}"}";
-             else journalctl --user -u "$SERVICE_NAME" -n 100 "${ARGS[@]+"${ARGS[@]}"}"; fi ;;
+  start)     require_service; service_start; sleep 1; service_status_short ;;
+  stop)      require_service; service_stop; ok "Stopped" ;;
+  restart)   require_service; service_restart; sleep 1; service_status_short ;;
+  logs)      require_service; service_logs 100 "${ARGS[@]+"${ARGS[@]}"}" ;;
   service)
     case "$SUBACTION" in
       add)    check_node; verify_app; service_add ;;
