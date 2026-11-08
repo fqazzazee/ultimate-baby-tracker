@@ -293,8 +293,17 @@ const bucketKey = (date) => `${date.getFullYear()}-${date.getMonth() + 1}-${date
 
 /* ------------------------------------------------------------------- data */
 
-/** Identifies the slice currently held, so a stale one can be spotted. */
-export const statsKey = () => `${state.babyId || 'all'}|${state.statsDays}`;
+/** Which baby and range a slice is for. */
+export const statsScope = () => `${state.babyId || 'all'}|${state.statsDays}`;
+
+/**
+ * Identifies the slice currently held, so a stale one can be spotted.
+ *
+ * The server's revision is part of it. Without it a bottle logged on Track did
+ * not reach this screen until the next minute's refresh or a change of range:
+ * the slice was for the right baby and the right days, so it counted as fresh.
+ */
+export const statsKey = () => `${statsScope()}|${state.data?.rev ?? ''}`;
 
 /**
  * How far before a range the slice reaches, for timed entries that began
@@ -348,12 +357,13 @@ export async function fetchSlice(babyId, days) {
 /** Pull the range's entries once; every chart on the screen reads this slice. */
 export async function loadStats() {
   const key = statsKey();
+  const scope = statsScope();
   const days = state.statsDays;
   try {
     const { events, carry } = await fetchSlice(state.babyId || 'all', days);
-    state.stats = { key, days, events, carry, loading: false, error: null };
+    state.stats = { key, scope, days, events, carry, loading: false, error: null };
   } catch (err) {
-    state.stats = { ...state.stats, key, days, loading: false, error: err.message };
+    state.stats = { ...state.stats, key, scope, days, loading: false, error: err.message };
   }
 }
 
@@ -640,7 +650,10 @@ function clockRows(cfg, events, width) {
  * reference lines on the charts can never disagree about what "per day" means.
  */
 function averages(rows, hourly, metricsByKey = new Map()) {
-  const done = !hourly && rows.length > 1 ? rows.slice(0, -1) : rows;
+  // Today is left out even when it is the only day there is. It used to be
+  // kept then, and the summary called it "Daily average over 1 full day" on
+  // the first morning of use; summaryCard shows today's totals instead.
+  const done = hourly ? rows : rows.slice(0, -1);
   // A day whose only entry was on a button of your own is still a day with
   // something in it; leaving it out would divide that button's own chart by a
   // denominator that pretends the day never happened.
@@ -682,7 +695,7 @@ function averages(rows, hourly, metricsByKey = new Map()) {
 
   return {
     buckets: withData.length,
-    partial: !hourly && rows.length > 1,
+    partial: !hourly,
     custom,
     leftMin: sum((r) => r.values.leftMin) / base,
     rightMin: sum((r) => r.values.rightMin) / base,
@@ -883,27 +896,36 @@ export function summaryCard(cfg, { rows, avg, sum, baby, hourly }) {
   const nursing = activeTypes(cfg).some(supportsSides)
     && rows.some((r) => r.values.nursedMin > 0);
 
-  // A one-day view reports today's totals; a longer one reports the daily mean.
-  const head = hourly
+  // A one-day view reports today's totals; a longer one reports the daily mean
+  // - unless today is all there is yet, when there is no mean to report and
+  // today's totals, called that, are more use than a row of dashes.
+  const todayOnly = !hourly && rows.length === 1;
+  const totalsView = hourly || todayOnly;
+  const head = totalsView
     ? { ml: sum.ml, feeds: sum.feeds, wet: sum.wet, dirty: sum.dirty, sleepMin: sum.sleepMin,
         pumpMl: sum.pumpMl, longestSleep: sum.longestSleep, kcal: sum.nutrients.kcal || 0,
         nursedMin: sum.nursedMin, leftMin: sum.leftMin, rightMin: sum.rightMin }
     : avg;
-  const per = hourly ? 'today' : '/ day';
+  const per = totalsView ? 'today' : '/ day';
 
-  const scope = hourly
-    ? 'Totals so far today — hours that have not happened yet are left off the charts.'
-    : `${avg.buckets ? `Daily average over ${avg.buckets} full day${avg.buckets === 1 ? '' : 's'}`
+  let scope;
+  if (hourly) {
+    scope = 'Totals so far today — hours that have not happened yet are left off the charts.';
+  } else if (todayOnly) {
+    scope = 'Only today has entries so far, so these are today\'s totals — a daily average needs a full day behind it.';
+  } else {
+    scope = `${avg.buckets ? `Daily average over ${avg.buckets} full day${avg.buckets === 1 ? '' : 's'}`
       : 'No full days yet'}${avg.partial ? ' — today is still in progress and is left out of the averages' : ''}.`;
+  }
 
   return `
       <div class="card">
         <div class="stat-grid kpi">
           ${on.feeds ? statTile(`${vol} ${per}`, head.ml ? Number(toDisplay(head.ml, 'cc', sys).toFixed(volDp)) : '—', weight && head.ml ? `${(toDisplay(head.ml, 'cc', sys) / perW.of(weight)).toFixed(1)} ${vol}/${perW.unit}` : '') : ''}
-          ${on.feeds ? statTile(`Feeds ${per}`, head.feeds ? head.feeds.toFixed(hourly ? 0 : 1) : '—', '') : ''}
+          ${on.feeds ? statTile(`Feeds ${per}`, head.feeds ? head.feeds.toFixed(totalsView ? 0 : 1) : '—', '') : ''}
           ${on.sleep ? statTile(`Sleep ${per}`, head.sleepMin ? fmtMinutes(Math.round(head.sleepMin)) : '—', head.longestSleep ? `best ${fmtMinutes(head.longestSleep)}` : '') : ''}
-          ${on.diapers ? statTile(`Wet ${per}`, head.wet ? head.wet.toFixed(hourly ? 0 : 1) : '—', '') : ''}
-          ${on.diapers ? statTile(`Dirty ${per}`, head.dirty ? head.dirty.toFixed(hourly ? 0 : 1) : '—', '') : ''}
+          ${on.diapers ? statTile(`Wet ${per}`, head.wet ? head.wet.toFixed(totalsView ? 0 : 1) : '—', '') : ''}
+          ${on.diapers ? statTile(`Dirty ${per}`, head.dirty ? head.dirty.toFixed(totalsView ? 0 : 1) : '—', '') : ''}
           ${on.pump ? statTile(`${vol} pumped ${per}`, head.pumpMl ? Number(toDisplay(head.pumpMl, 'cc', sys).toFixed(volDp)) : '—', '') : ''}
           ${nursing ? statTile(`Nursing ${per}`, head.nursedMin ? fmtMinutes(Math.round(head.nursedMin)) : '—',
             head.nursedMin ? `${Math.round((head.leftMin / head.nursedMin) * 100)}% left` : '') : ''}
@@ -1286,7 +1308,9 @@ export function chartGroups(cfg, type, metrics) {
 
   const buckets = new Map();
   for (const m of on) {
-    const key = `${m.agg}|${m.unit || ''}`;
+    // A reading never pairs: see canShareChart. A key of its own keeps it a
+    // single chart in the place it would otherwise have taken.
+    const key = canShareChart(m) ? `${m.agg}|${m.unit || ''}` : `solo|${m.key}`;
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(m);
   }
@@ -1296,6 +1320,17 @@ export function chartGroups(cfg, type, metrics) {
   }
   return out;
 }
+
+/**
+ * Whether a metric may share a chart with another at all.
+ *
+ * Not a "latest" or an "average". A pair is drawn as columns, and a reading
+ * drawn as a column is a bar of nought on every day nobody measured - which
+ * under US units became a °C pair plotting 32 °F on empty days. Alone, a
+ * reading is a line with gaps (measuredCard); a line of two series is a chart
+ * this app does not draw, so readings stay one to a chart.
+ */
+export const canShareChart = (m) => !isMeasured(m);
 
 /** Minutes are stored, hours read better once a day's worth piles up. */
 function asHoursScale(metrics, peak) {

@@ -21,6 +21,7 @@ import {
 import { supportsSides } from './feeding.js';
 import {
   customChartTypes, customChartOn, chartableMetrics, chartGroups, combineCharts, stackCharts,
+  canShareChart,
   AGGREGATIONS,
 } from './stats.js';
 
@@ -1253,14 +1254,16 @@ function pairLine(pair) {
  * asked for would be noise on the screen that lists them, and one of them would
  * eventually be wrong for somebody. Offered here instead, so the arithmetic is
  * a tap rather than a search, and every one stays editable afterwards.
+ *
+ * Every metric side here must be a unit that is not built in: a metric unit
+ * converts one way only, and mL (to fl oz) and kg (to lb) already do, so
+ * "ml ⇄ tsp" and "kg ⇄ st" were starters that Save then refused.
  */
 const UNIT_SUGGESTIONS = [
   { label: 'g ⇄ oz', metric: 'g', us: 'oz', per: 28.349523125, metricDp: 0, usDp: 2 },
-  { label: 'kg ⇄ st', metric: 'kg', us: 'st', per: 6.35029318, metricDp: 2, usDp: 2 },
   { label: 'm ⇄ ft', metric: 'm', us: 'ft', per: 0.3048, metricDp: 2, usDp: 1 },
   { label: 'mm ⇄ in', metric: 'mm', us: 'in', per: 25.4, metricDp: 0, usDp: 2 },
   { label: 'km ⇄ mi', metric: 'km', us: 'mi', per: 1.609344, metricDp: 2, usDp: 2 },
-  { label: 'ml ⇄ tsp', metric: 'mL', us: 'tsp', per: 4.92892159375, metricDp: 1, usDp: 2 },
   { label: 'L ⇄ gal', metric: 'L', us: 'gal', per: 3.785411784, metricDp: 2, usDp: 2 },
 ];
 
@@ -1608,7 +1611,8 @@ function statsCard(cfg) {
  * drawn, rather than drawn and doing nothing.
  */
 function combinable(cfg, type) {
-  const on = chartableMetrics(type).filter((m) => customChartOn(cfg, type, m.key));
+  const on = chartableMetrics(type)
+    .filter((m) => customChartOn(cfg, type, m.key) && canShareChart(m));
   const seen = new Map();
   for (const m of on) {
     const key = `${m.agg}|${m.unit || ''}`;
@@ -1626,7 +1630,7 @@ function combineHint(cfg, type) {
       ? `${pairs.map((g) => g.map((m) => m.label).join(' + ')).join(', ')} share a chart`
       : 'On, but nothing here shares a unit yet';
   }
-  return 'One chart each. Only measures in the same unit, summarised the same way, can share one';
+  return 'One chart each. Only totals and counts in the same unit can share one — a latest or an average stays a line of its own';
 }
 
 /**
