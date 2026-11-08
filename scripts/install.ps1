@@ -290,33 +290,58 @@ function Assert-Replaceable {
 
 # Swap a freshly fetched copy into place. Only called once the copy is complete,
 # so a failed download or clone leaves the existing install as it was.
+#
+# The old copy is moved aside before it is deleted, not deleted where it is:
+# Windows will not rename a directory that a running program is using, so if
+# anything still holds it this fails before a single file is gone, instead of
+# halfway through deleting it.
 function Set-FromStage {
   param([string]$Stage, [string]$Dest)
-  if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-  Move-Item $Stage $Dest
+  if (-not (Test-Path $Dest)) { Move-Item $Stage $Dest; return }
+  $old = Join-Path (Split-Path $Dest -Parent) (".$(Split-Path $Dest -Leaf).old.$PID")
+  try {
+    Move-Item $Dest $old
+  } catch {
+    Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue
+    Die "Could not replace ${Dest}: $($_.Exception.Message)`n  Something is still using it - the tracker itself, or a window open on that`n  folder. Stop it, close the window, and run this again."
+  }
+  try {
+    Move-Item $Stage $Dest
+  } catch {
+    Move-Item $old $Dest
+    throw
+  }
+  Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path $old) { Warn "Could not delete the previous copy at $old; it is safe to remove by hand." }
 }
 
+<#
+  Fetching and switching are two steps, so 'update' can do everything that
+  needs the network - the part most likely to fail - while the old version is
+  still running, and stop it only once there is something to switch to.
+
+  Get-Source fetches without touching $Dest and returns what Set-Source needs:
+  for a git checkout, the fetched origin/<branch>; otherwise a complete copy
+  staged beside $Dest. Neither goes anywhere near the data directory.
+#>
 function Get-Source {
   param([string]$Dest)
 
   Assert-Replaceable $Dest
   if (Test-Path (Join-Path $Dest '.git')) {
-    Step 'Updating the existing checkout'
+    Step "Fetching $Branch"
     # The refspec is spelled out because the checkout is a shallow clone of a
     # single branch: a bare 'fetch origin dev' fetches dev but records no
-    # origin/dev, and the checkout below then fails with "not a commit".
+    # origin/dev, and the checkout in Set-Source then fails with "not a commit".
     $steps = @(
       @('remote', 'set-url', 'origin', $RepoUrl),
-      @('fetch', '--depth', '1', 'origin', "+refs/heads/${Branch}:refs/remotes/origin/$Branch"),
-      @('checkout', '-q', '-B', $Branch, "origin/$Branch"),
-      @('reset', '--hard', '-q', "origin/$Branch")
+      @('fetch', '--depth', '1', 'origin', "+refs/heads/${Branch}:refs/remotes/origin/$Branch")
     )
     foreach ($step in $steps) {
       $r = Invoke-Native -File 'git' -Arguments (@('-C', $Dest) + $step)
       if ($r.Code -ne 0) { Die "git $($step -join ' ') failed:`n$($r.Text)" }
     }
-    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')) + " on $Branch")
-    return
+    return [pscustomobject]@{ Kind = 'git'; Stage = $null }
   }
 
   $parent = Split-Path $Dest -Parent
@@ -334,9 +359,7 @@ function Get-Source {
       Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
       Die "Could not clone $RepoUrl (branch $Branch):`n$($r.Text)"
     }
-    Set-FromStage -Stage $stage -Dest $Dest
-    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')))
-    return
+    return [pscustomobject]@{ Kind = 'clone'; Stage = $stage }
   }
 
   Step "Downloading $Branch (git is not installed, so this is a zip)"
@@ -344,7 +367,11 @@ function Get-Source {
   New-Item -ItemType Directory -Path $tmp -Force | Out-Null
   try {
     $zip = Join-Path $tmp 'src.zip'
-    Invoke-WebRequest -Uri "$RepoUrl/archive/refs/heads/$Branch.zip" -OutFile $zip -UseBasicParsing
+    try {
+      Invoke-WebRequest -Uri "$RepoUrl/archive/refs/heads/$Branch.zip" -OutFile $zip -UseBasicParsing
+    } catch {
+      Die "Could not download $RepoUrl (branch $Branch): $($_.Exception.Message)"
+    }
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     # The archive nests everything under <repo>-<branch>\.
     $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
@@ -353,11 +380,36 @@ function Get-Source {
     }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item (Join-Path $inner.FullName '*') $stage -Recurse -Force
-    Set-FromStage -Stage $stage -Dest $Dest
-    Ok "Unpacked to $Dest"
-    Warn "Without git, 'update' re-downloads the whole zip each time."
+  } catch {
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+    throw
   } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  return [pscustomobject]@{ Kind = 'zip'; Stage = $stage }
+}
+
+# Put in place what Get-Source fetched.
+function Set-Source {
+  param([object]$Fetched, [string]$Dest)
+
+  if ($Fetched.Kind -eq 'git') {
+    # -f discards local edits to the app directory, which is not the place for
+    # them. Without it a dirty tree makes the checkout refuse ("Please commit
+    # your changes"), and every update after that fails the same way.
+    $step = @('checkout', '-q', '-f', '-B', $Branch, "origin/$Branch")
+    $r = Invoke-Native -File 'git' -Arguments (@('-C', $Dest) + $step)
+    if ($r.Code -ne 0) { Die "git $($step -join ' ') failed:`n$($r.Text)" }
+    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')) + " on $Branch")
+    return
+  }
+
+  Set-FromStage -Stage $Fetched.Stage -Dest $Dest
+  if ($Fetched.Kind -eq 'clone') {
+    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')))
+  } else {
+    Ok "Unpacked to $Dest"
+    Warn "Without git, 'update' re-downloads the whole zip each time."
   }
 }
 
@@ -601,7 +653,8 @@ function Show-Where {
 function Invoke-Install {
   Step "Installing $AppName"
   Get-NodePath | Out-Null
-  Get-Source -Dest $AppDir
+  $fetched = Get-Source -Dest $AppDir
+  Set-Source -Fetched $fetched -Dest $AppDir
   Assert-App
   if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir -Force | Out-Null }
   Ok "Data directory: $DataDir"
@@ -621,25 +674,51 @@ function Invoke-Install {
 
 function Invoke-Update {
   Step "Updating $AppName"
-  Get-NodePath | Out-Null
+  $node = Get-NodePath
   Assert-App
   $before = Get-Revision
-  Backup-Data
 
-  $wasRunning = [bool](Get-AppProcess)
-  if ($wasRunning) { Stop-App; Start-Sleep -Seconds 1 }
+  # Everything that needs the network comes first, while the running copy
+  # carries on serving: no connection or a mistyped -Branch then costs nothing.
+  $fetched = Get-Source -Dest $AppDir
 
-  Get-Source -Dest $AppDir
-  Assert-App
-  $after = Get-Revision
-
-  if ($wasRunning) {
-    # The shim pins the node path and the data directory, so rewrite it in case
-    # either moved between releases.
-    Write-Shim -NodePath (Get-Command node).Source
-    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+  $task = Get-Task
+  $wasRunning = [bool](Get-AppProcess) -or ($task -and $task.State -eq 'Running')
+  $stopped = $false
+  $done = $false
+  # From here on the tracker is down, so whatever happens - a failed checkout,
+  # a full disk, Ctrl+C - the finally block starts it again; at worst on the
+  # version it was running before.
+  try {
+    if ($wasRunning) {
+      Step 'Stopping the running copy'
+      Stop-App
+      $stopped = $true
+      Start-Sleep -Seconds 1
+    }
+    # Taken only once it is stopped, so no file is half-written as it is copied.
+    Backup-Data
+    Set-Source -Fetched $fetched -Dest $AppDir
+    Assert-App
+    # The launcher pins the node path and the directories: rewrite it in case
+    # node moved, and so that a -Port or -Data given to this update applies.
+    if ($task) { Write-Shim -NodePath $node }
+    $done = $true
+  } finally {
+    if ($fetched.Stage -and (Test-Path $fetched.Stage)) {
+      Remove-Item $fetched.Stage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($stopped) {
+      if (-not $done) { Warn 'The update did not finish; starting the copy that was running again.' }
+      if ($task) {
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+      } else {
+        Warn 'It was not started by the logon task, so start it again the way you started it.'
+      }
+    }
   }
+  $after = Get-Revision
 
   if ($before -eq $after) {
     Ok "Already at the latest revision ($after)"
