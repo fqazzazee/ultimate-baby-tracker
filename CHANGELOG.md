@@ -5,7 +5,91 @@ and the version in `package.json` is what the header and the About card display.
 
 ## Unreleased
 
+### Added
+
+- **macOS gets a background service.** `install.sh` now sets up a LaunchAgent —
+  no root, starts at login, restarts the server if it stops — with `start`,
+  `stop`, `restart`, `status` and `logs` working as on Linux. (#30)
+- **Alarm notifications on Android, and honesty where they can't work.** Over
+  HTTPS or localhost a small service worker shows alarm notifications (Android
+  allows no other way); it caches nothing. On plain `http://<address>`, or with
+  notifications blocked, the Alarms screen now says so. Phones still pause a
+  page in the background, so an alarm cannot ring on a locked phone. (part of #60)
+- At-time alarms accept `8:00 PM`, `8pm`, `20.00` and similar, saved as
+  `20:00`; unreadable times are refused on save, and ones already saved in
+  12-hour form now ring. (#57)
+
 ### Fixed
+
+**Your data**
+
+- **A power cut mid-write no longer loses the next entry.** A torn last line
+  in `events.log` is set aside to `events.log.torn-<time>` at startup instead
+  of swallowing the entry written after it. (#39)
+- **A write that fails no longer shows as saved.** Entries, timers, alarms and
+  Setup reach the disk before memory, so a full or read-only disk leaves
+  nothing half-done, and a stopped timer is never lost. (#43)
+- **Two phones editing Setup can no longer undo each other.** A save made from
+  an out-of-date copy is refused, the screen reloads, and you are asked to make
+  the change again. (#42)
+- **A stale "Switch side" or Start tap no longer revives a finished feed** or
+  replaces a timer another phone is running. (#46)
+- **Editing an entry keeps what you didn't see**, such as the breast a feed
+  started on, and fields hidden by *show if* are no longer saved. (#47, #48)
+- **Renaming or deleting a milk profile no longer changes past feeds'
+  nutrition.** Entries now remember the profile itself (`milkId`), old names
+  are kept as aliases, and deleted profiles are retired rather than dropped.
+  (#54)
+
+**Alarms**
+
+- **"Every" alarms** no longer ring from the moment they are armed and again
+  straight after Dismiss. (#40)
+- **New time-of-day alarms** keep ringing for an hour when the slot is missed
+  by a few minutes, instead of skipping to tomorrow. (#41)
+- **Alarms ring with Sounds switched off** — that switch is for the logging
+  chime. (#50)
+
+**Screens**
+
+- **Sleep counts in the hours and days it covered**, so the 1-day view
+  includes last night and an overnight sleep is split across both days. (#58)
+- Chart subtitles and two form attributes escape what you typed, so a button
+  option can no longer inject markup. (#52)
+- Choice options in emoji or non-Latin script get their own chart counts
+  instead of sharing one. (#55)
+- Closing the button editor without Cancel no longer keeps the abandoned edit
+  for next time. (#56)
+- Readings (latest/average) are no longer paired into a chart that drew empty
+  days as zero; the first day shows today's totals instead of a one-day
+  "average"; Stats picks up a new entry straight away; the `ml ⇄ tsp` and
+  `kg ⇄ st` unit starters, which could never be saved, are gone. (#59)
+- The screen no longer stays on data from before your own change when a
+  refresh was already under way. (#49)
+- History says when a long range was trimmed instead of silently dropping the
+  oldest days. (#45)
+- Locking a profile moves off it, and picking a locked person under *Who*
+  asks for the PIN. (#51)
+- A stopped timer stays with whoever started it, and "Yesterday" is right in
+  the hour after clocks spring forward. (#53)
+- Backup names use local time with the UTC offset, so an evening backup no
+  longer carries tomorrow's date. (#44)
+
+**Installers**
+
+- On a Mac without the Command Line Tools, the one-line install falls back to
+  downloading the app instead of failing at the placeholder `git`. (#29)
+- A failed update no longer leaves the service stopped: it downloads first,
+  then stops, snapshots, switches and starts, and restarts the service if
+  anything fails. Local edits in the app directory no longer abort it. (#31)
+- `update --branch` can switch branches. (#35)
+- Windows: `status`, `stop`, `restart` and `update` find the running server;
+  later commands remember `-Port`, `-Listen`, `-Dir` and `-Data`; the task
+  restarts the server after a crash. (#32, #33, #36)
+- Smaller fixes: paths with spaces, `--system` remembered, `--port` without a
+  value, hints that named the wrong script or dropped the host, snapshots
+  beside a custom data directory, and `-Purge` reporting a removal that
+  failed. (#37)
 
 - **The installers no longer delete a directory that is not theirs.** Pointing
   `--dir` (`-Dir` on Windows) at a folder that already held anything other than
