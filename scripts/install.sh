@@ -70,6 +70,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 check_node() {
   have node || die "Node.js is not installed. Node $MIN_NODE_MAJOR or newer is required.
+  macOS:         the macOS Installer (.pkg) from https://nodejs.org/en/download
+                 (or brew install node, if you already use Homebrew)
   Fedora:        sudo dnf install nodejs
   Debian/Ubuntu: sudo apt install nodejs
   Anywhere:      https://nodejs.org  (or nvm, which needs no root)"
@@ -92,6 +94,19 @@ sc() { if [ "$MODE" = "system" ]; then sudo systemctl "$@"; else systemctl --use
 unit_path() {
   if [ "$MODE" = "system" ]; then echo "/etc/systemd/system/$SERVICE_NAME.service"
   else echo "$UNIT_DIR/$SERVICE_NAME.service"; fi
+}
+
+# On a Mac without Apple's Command Line Tools, /usr/bin/git is a placeholder: it
+# offers to install them and fails. So "is git on the PATH" is the wrong
+# question; "does git run" is the right one. Where that placeholder is the only
+# git it is not even run, because running it pops up the install dialog.
+git_works() {
+  have git || return 1
+  if [ "$(uname -s)" = "Darwin" ] && [ "$(command -v git)" = "/usr/bin/git" ] \
+     && have xcode-select && ! xcode-select -p >/dev/null 2>&1; then
+    return 1
+  fi
+  git --version >/dev/null 2>&1
 }
 
 # ------------------------------------------------------------- path safety --
@@ -204,7 +219,9 @@ check_replaceable() {
 fetch_source() {
   local dest="$1"
   check_replaceable "$dest"
-  if [ -d "$dest/.git" ]; then
+  # A checkout is only updated in place while git works; if it has stopped
+  # working (the Command Line Tools were removed, say) the copy is replaced.
+  if [ -d "$dest/.git" ] && git_works; then
     step "Updating the existing checkout"
     git -C "$dest" remote set-url origin "$REPO_URL"
     git -C "$dest" fetch --depth 1 origin "$BRANCH"
@@ -220,16 +237,17 @@ fetch_source() {
   local stage
   stage="$(dirname "$dest")/.$(basename "$dest").new.$$"
   rm -rf "$stage"
-  if have git; then
+  if git_works; then
     step "Cloning $REPO_URL ($BRANCH)"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$stage" >/dev/null 2>&1 \
-      || { rm -rf "$stage"; die "Could not clone $REPO_URL. Check the network, or the branch name."; }
+    # git's own message says what went wrong, so it is left on the screen.
+    git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$stage" \
+      || { rm -rf "$stage"; die "Could not clone $REPO_URL ($BRANCH); git's message is above."; }
     replace_dir "$stage" "$dest"
     ok "At $(git -C "$dest" rev-parse --short HEAD)"
   else
     have curl || have wget || die "Need git, curl or wget to download the app."
     have tar || die "Need tar to unpack the download."
-    step "Downloading $BRANCH (git is not installed, so this is a tarball)"
+    step "Downloading $BRANCH (git is not available, so this is a tarball)"
     local tmp src
     tmp="$(mktemp -d)"
     local url="$REPO_URL/archive/refs/heads/$BRANCH.tar.gz"
@@ -252,6 +270,16 @@ fetch_source() {
     replace_dir "$stage" "$dest"
     ok "Unpacked to $dest"
     warn "Without git, 'update' re-downloads the whole tarball each time."
+  fi
+}
+
+# The checked-out revision, or "unknown" for a tarball install. Only a working
+# git is asked, for the same reason as in git_works.
+revision() {
+  if [ -d "$APP_DIR/.git" ] && git_works; then
+    git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown
+  else
+    echo unknown
   fi
 }
 
@@ -450,7 +478,7 @@ do_update() {
   check_node
   verify_app
   local before after
-  before="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  before="$(revision)"
   snapshot_data
 
   local was_running=0
@@ -461,7 +489,7 @@ do_update() {
 
   fetch_source "$APP_DIR"
   verify_app
-  after="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  after="$(revision)"
 
   if [ "$was_running" = "1" ]; then
     # The unit pins the node path and the data directory, so rewrite it in case
@@ -476,7 +504,7 @@ do_update() {
     ok "Already at the latest revision ($after)"
   else
     ok "Updated $before → $after"
-    [ -d "$APP_DIR/.git" ] && git -C "$APP_DIR" --no-pager log --oneline "$before..$after" 2>/dev/null | head -10 || true
+    [ "$after" != unknown ] && git -C "$APP_DIR" --no-pager log --oneline "$before..$after" 2>/dev/null | head -10 || true
   fi
   [ "$was_running" = "1" ] && service_status_short
   return 0
@@ -511,7 +539,8 @@ do_uninstall() {
 
 do_status() {
   say "${B}$APP_NAME${R}"
-  say "  app     $APP_DIR $([ -d "$APP_DIR/.git" ] && echo "($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null))" || echo '')"
+  local rev; rev="$(revision)"
+  say "  app     $APP_DIR $([ "$rev" != unknown ] && echo "($rev)" || echo '')"
   say "  data    $DATA_DIR"
   say "  version $(node -p "require('$APP_DIR/package.json').version" 2>/dev/null || echo 'not installed')"
   say "  unit    $(unit_path)"
