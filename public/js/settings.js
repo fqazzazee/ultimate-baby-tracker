@@ -453,18 +453,31 @@ const FIELD_KINDS = [
   { value: 'duration', label: 'Duration' },
 ];
 
+/**
+ * Open the button editor from Setup's list.
+ *
+ * Always starts from a fresh copy of the config. The draft used to be reused
+ * whenever it was for the same button, which was meant for coming back from
+ * the field and preset sub-sheets - but a sheet dismissed with Escape or the
+ * backdrop never cleared it, so the next Edit brought back the abandoned
+ * changes, and a Save then wrote back a stale copy over anything changed since
+ * (tracked or not, its place in the order). The sub-sheets return through
+ * `renderTypeSheet`, which is the only path that keeps a draft.
+ */
 export function openTypeSheet(typeId = null) {
-  const cfg = config();
-  if (!draft || draft.id !== typeId) {
-    const found = cfg.eventTypes.find((t) => t.id === typeId);
-    draft = found
-      ? structuredClone(found)
-      : {
-          id: null, label: '', emoji: '⭐', tone: 'lavender', mode: 'instant',
-          sound: 'chime', order: 500, fields: [], presets: [{ id: uid('p'), label: 'Log', emoji: '⭐', data: {} }],
-          builtin: false, archived: false,
-        };
-  }
+  const found = config().eventTypes.find((t) => t.id === typeId);
+  draft = found
+    ? structuredClone(found)
+    : {
+        id: null, label: '', emoji: '⭐', tone: 'lavender', mode: 'instant',
+        sound: 'chime', order: 500, fields: [], presets: [{ id: uid('p'), label: 'Log', emoji: '⭐', data: {} }],
+        builtin: false, archived: false,
+      };
+  renderTypeSheet();
+}
+
+/** The editor itself, drawn from `draft` as it stands. */
+function renderTypeSheet() {
   const t = draft;
   // The milk picker's hidden id (see fieldHTML) is bookkeeping, not a value
   // anybody chose, so the preset list does not spell it out.
@@ -552,7 +565,7 @@ export function openTypeSheet(typeId = null) {
       b.addEventListener('click', () => {
         sync();
         draft.fields.splice(Number(b.dataset.fieldDel), 1);
-        openTypeSheet(draft.id);
+        renderTypeSheet();
       }));
 
     sheet.querySelector('[data-preset-add]').addEventListener('click', () => { sync(); openPresetSheet(-1); });
@@ -562,7 +575,7 @@ export function openTypeSheet(typeId = null) {
       b.addEventListener('click', () => {
         sync();
         draft.presets.splice(Number(b.dataset.presetDel), 1);
-        openTypeSheet(draft.id);
+        renderTypeSheet();
       }));
 
     sheet.querySelector('[data-cancel]').addEventListener('click', () => { draft = null; closeSheet(); });
@@ -575,7 +588,11 @@ export function openTypeSheet(typeId = null) {
       closeSheet();
       await saveConfig((cfgDraft) => {
         const i = cfgDraft.eventTypes.findIndex((x) => x.id === next.id);
-        if (i >= 0) cfgDraft.eventTypes[i] = next;
+        // Where it sits and whether it is tracked are set elsewhere in Setup,
+        // never in this sheet, so they are taken from the config as it is now
+        // rather than from when the sheet opened.
+        const { order, archived } = cfgDraft.eventTypes[i] || {};
+        if (i >= 0) cfgDraft.eventTypes[i] = { ...next, order, archived };
         else cfgDraft.eventTypes.push({ ...next, order: (cfgDraft.eventTypes.length + 1) * 10 });
       });
       sound.play(next.sound || 'success');
@@ -695,7 +712,7 @@ function openFieldSheet(index) {
     unitBox.addEventListener('input', sayUnit);
     sayUnit();
 
-    sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
+    sheet.querySelector('[data-back]').addEventListener('click', () => renderTypeSheet());
 
     sheet.querySelector('[data-save]').addEventListener('click', () => {
       const label = sheet.querySelector('[data-meta="label"]').value.trim();
@@ -724,7 +741,7 @@ function openFieldSheet(index) {
       };
       if (index >= 0) draft.fields[index] = next;
       else draft.fields.push(next);
-      openTypeSheet(draft.id);
+      renderTypeSheet();
     });
   });
 }
@@ -766,7 +783,7 @@ function openPresetSheet(index) {
   `, (sheet) => {
     wirePickers(sheet);
     wireFieldControls(sheet.querySelector('[data-fields]'));
-    sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
+    sheet.querySelector('[data-back]').addEventListener('click', () => renderTypeSheet());
     sheet.querySelector('[data-save]').addEventListener('click', () => {
       const label = sheet.querySelector('[data-meta="label"]').value.trim();
       if (!label) return toast({ icon: '✏️', text: 'Button needs a label', tone: 'peach' });
@@ -778,7 +795,7 @@ function openPresetSheet(index) {
       };
       if (index >= 0) draft.presets[index] = next;
       else draft.presets.push(next);
-      openTypeSheet(draft.id);
+      renderTypeSheet();
     });
   });
 }
