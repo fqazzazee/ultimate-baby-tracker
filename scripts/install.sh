@@ -214,39 +214,43 @@ check_replaceable() {
 
 # -------------------------------------------------------------- fetch code --
 
+# Getting the code and putting it in place are two steps, so that an update
+# can do all the downloading while the tracker is still running and only stop
+# it for the switch. fetch_source leaves the new revision waiting - in the
+# checkout's object store, or unpacked into $STAGE beside the destination - and
+# changes nothing you would notice; switch_source then puts it in place.
+STAGE=""
+
 # Prefer a git clone: updating is then a fetch, and you can see what changed.
-# Fall back to the branch tarball where git is not installed.
+# Fall back to the branch tarball where git is not available.
 fetch_source() {
   local dest="$1"
   check_replaceable "$dest"
+  STAGE=""
   # A checkout is only updated in place while git works; if it has stopped
   # working (the Command Line Tools were removed, say) the copy is replaced.
   if [ -d "$dest/.git" ] && git_works; then
-    step "Updating the existing checkout"
+    step "Fetching $BRANCH"
     git -C "$dest" remote set-url origin "$REPO_URL"
     # Spelled out in full because the clone is single-branch: its configured
     # refspec only covers the branch it was cloned on, so a plain fetch of
     # another branch would never create origin/<that branch>.
-    git -C "$dest" fetch -q --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-    git -C "$dest" checkout -q -B "$BRANCH" "origin/$BRANCH"
-    git -C "$dest" reset --hard -q "origin/$BRANCH"
-    ok "At $(git -C "$dest" rev-parse --short HEAD) on $BRANCH"
+    git -C "$dest" fetch -q --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
+      || die "Could not fetch $BRANCH from $REPO_URL; git's message is above. Nothing was changed."
     return
   fi
 
   mkdir -p "$(dirname "$dest")"
   # Fetched beside the destination, then swapped in, so it is a rename on the
   # same filesystem and the old copy is only removed once the new one is whole.
-  local stage
-  stage="$(dirname "$dest")/.$(basename "$dest").new.$$"
-  rm -rf "$stage"
+  # If anything fails before then, the EXIT trap removes the half-made copy.
+  STAGE="$(dirname "$dest")/.$(basename "$dest").new.$$"
+  rm -rf "$STAGE"
   if git_works; then
     step "Cloning $REPO_URL ($BRANCH)"
     # git's own message says what went wrong, so it is left on the screen.
-    git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$stage" \
-      || { rm -rf "$stage"; die "Could not clone $REPO_URL ($BRANCH); git's message is above."; }
-    replace_dir "$stage" "$dest"
-    ok "At $(git -C "$dest" rev-parse --short HEAD)"
+    git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$STAGE" \
+      || die "Could not clone $REPO_URL ($BRANCH); git's message is above."
   else
     have curl || have wget || die "Need git, curl or wget to download the app."
     have tar || die "Need tar to unpack the download."
@@ -267,10 +271,26 @@ fetch_source() {
       rm -rf "$tmp"
       die "The download from $url does not contain the app."
     fi
-    mkdir -p "$stage"
-    cp -a "$src"/. "$stage"/
+    mkdir -p "$STAGE"
+    cp -a "$src"/. "$STAGE"/
     rm -rf "$tmp"
-    replace_dir "$stage" "$dest"
+  fi
+}
+
+switch_source() {
+  local dest="$1"
+  if [ -z "$STAGE" ]; then
+    # Forced, so that a stray local edit is overwritten instead of aborting the
+    # update halfway: the application directory is not for your own changes.
+    git -C "$dest" checkout -q -f -B "$BRANCH" "origin/$BRANCH"
+    ok "At $(git -C "$dest" rev-parse --short HEAD) on $BRANCH"
+    return
+  fi
+  replace_dir "$STAGE" "$dest"
+  STAGE=""
+  if [ -d "$dest/.git" ]; then
+    ok "At $(git -C "$dest" rev-parse --short HEAD)"
+  else
     ok "Unpacked to $dest"
     warn "Without git, 'update' re-downloads the whole tarball each time."
   fi
@@ -435,6 +455,10 @@ service_remove() {
   ok "Service removed. The app and your data are untouched."
 }
 
+service_running() {
+  has_systemd && sc is-active --quiet "$SERVICE_NAME" 2>/dev/null
+}
+
 service_status_short() {
   if has_systemd && sc is-active --quiet "$SERVICE_NAME"; then
     ok "Running at ${B}http://localhost:$PORT${R}"
@@ -460,6 +484,7 @@ do_install() {
   check_node
   check_paths
   fetch_source "$APP_DIR"
+  switch_source "$APP_DIR"
   verify_app
   mkdir -p "$DATA_DIR"
   ok "Data directory: $DATA_DIR"
@@ -482,28 +507,41 @@ do_update() {
   verify_app
   local before after
   before="$(revision)"
-  snapshot_data
 
+  # Everything that needs the network happens first, while the tracker is
+  # still up, so a bad connection or a mistyped branch changes nothing.
+  fetch_source "$APP_DIR"
+
+  # From here the service is off until the end, or until the EXIT trap starts
+  # it again if anything fails.
   local was_running=0
-  if has_systemd && sc is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+  if service_running; then
     was_running=1
+    RESTART_ON_EXIT=1
+    step "Stopping the service"
     sc stop "$SERVICE_NAME"
   fi
-
-  fetch_source "$APP_DIR"
+  # Taken with the service stopped, so it cannot catch a half-written file.
+  snapshot_data
+  switch_source "$APP_DIR"
   verify_app
   after="$(revision)"
 
-  if [ "$was_running" = "1" ]; then
-    # The unit pins the node path and the data directory, so rewrite it in case
-    # either moved between releases.
+  # The unit pins the node path and the data directory, so rewrite it in case
+  # either moved between releases.
+  if [ -f "$(unit_path)" ] && has_systemd; then
     if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
     sc daemon-reload
+  fi
+  if [ "$was_running" = "1" ]; then
     sc start "$SERVICE_NAME"
+    RESTART_ON_EXIT=0
     sleep 1
   fi
 
-  if [ "$before" = "$after" ]; then
+  if [ "$after" = unknown ]; then
+    ok "Replaced with the latest download of $BRANCH"
+  elif [ "$before" = "$after" ]; then
     ok "Already at the latest revision ($after)"
   else
     ok "Updated $before → $after"
@@ -645,6 +683,28 @@ case "${ACTION:-}" in
   install|update|uninstall) check_layout ;;
   service) if [ "$SUBACTION" = "add" ]; then check_layout; fi ;;
 esac
+
+# However the script ends, leave no half-fetched copy behind, and never leave
+# the tracker switched off: if an update stopped the service and then failed,
+# start it again on whatever code is in place - the old code, unless the
+# failure came after the switch. A tracker that is down at 3am is worse than
+# one running last week's revision.
+RESTART_ON_EXIT=0
+on_exit() {
+  local status=$?
+  if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
+  if [ "$RESTART_ON_EXIT" = "1" ]; then
+    RESTART_ON_EXIT=0
+    warn "The update did not finish; starting the service again."
+    if sc start "$SERVICE_NAME" >/dev/null 2>&1; then
+      ok "Service started again"
+    else
+      warn "It would not start. See: $SELF status"
+    fi
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
 
 case "${ACTION:-}" in
   install)   do_install ;;
