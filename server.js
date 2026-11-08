@@ -325,7 +325,17 @@ async function handleAPI(req, res, url) {
     if (method === 'POST' && !id) {
       const body = await readBody(req);
       if (!body.typeId || !body.babyId) return sendJSON(res, 400, { error: 'babyId and typeId are required' });
-      return sendJSON(res, 201, { timer: store.startTimer(body), rev: store.getRevision() });
+      try {
+        return sendJSON(res, 201, { timer: store.startTimer(body), rev: store.getRevision() });
+      } catch (err) {
+        if (!err.conflict) throw err;
+        // 409 rather than 404 for a timer that has gone: the route exists, it is
+        // the caller's picture of what is running that is out of date. `code`
+        // says which way, and `timer` is what is actually running, if anything.
+        return sendJSON(res, 409, {
+          error: err.message, code: err.conflict, timer: err.running, rev: store.getRevision(),
+        });
+      }
     }
     if (method === 'POST' && id && action === 'stop') {
       const body = await readBody(req);

@@ -11,7 +11,13 @@ async function request(path, options = {}) {
   if (text) {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
   }
-  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // The status and the server's `code` ride along, so a caller can tell "the
+    // world moved on while you were looking" (409) from a plain failure.
+    throw Object.assign(new Error(data?.error || `HTTP ${res.status}`), {
+      status: res.status, code: data?.code || null, data,
+    });
+  }
   return data;
 }
 
@@ -45,6 +51,8 @@ export const api = {
   deleteEvent: (id) => request(`/api/events/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   events: (params = {}) => request(`/api/events?${new URLSearchParams(params)}`),
 
+  // `timer.replaces` names the running timer a side switch re-issues; without
+  // it the server refuses (409) to start over a timer that is already running.
   startTimer: (timer) => request('/api/timers', { method: 'POST', body: timer }),
   stopTimer: (id, extra = {}) => request(`/api/timers/${encodeURIComponent(id)}/stop`, { method: 'POST', body: extra }),
   cancelTimer: (id) => request(`/api/timers/${encodeURIComponent(id)}`, { method: 'DELETE' }),

@@ -319,6 +319,9 @@ export async function quickLog(typeId, presetId) {
       await refresh();
     } catch (err) {
       toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
+      // Most often a 409: another phone is already timing this. Refreshing puts
+      // its timer on this card, where the next tap stops it.
+      await refresh();
     }
     return;
   }
@@ -392,6 +395,9 @@ export async function switchFeedSide(timerId, toSide) {
       typeId: timer.typeId,
       presetId: timer.presetId,
       startedAt: timer.startedAt,
+      // Names the timer being re-issued, so a server that has since seen it
+      // stopped on another phone refuses rather than bringing it back.
+      replaces: timer.id,
       data: { ...timer.data, side: toSide, firstSide: next.firstSide },
     });
     writeSession(reissued || timer, next);
@@ -399,6 +405,7 @@ export async function switchFeedSide(timerId, toSide) {
     await refresh();
   } catch (err) {
     toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
+    await refresh(); // a refusal means this card is out of date; show what is true
   }
 }
 
