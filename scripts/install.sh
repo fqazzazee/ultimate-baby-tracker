@@ -94,12 +94,116 @@ unit_path() {
   else echo "$UNIT_DIR/$SERVICE_NAME.service"; fi
 }
 
+# ------------------------------------------------------------- path safety --
+
+# An absolute, physical path for comparing locations, whether or not it exists
+# yet: the nearest existing ancestor is resolved through any symlinks, and the
+# rest is put back with . and .. collapsed. Only used for the checks below; the
+# paths written to the unit stay as they were given.
+real_path() {
+  local p="$1" tail="" out part rest
+  case "$p" in "~") p="$HOME" ;; "~/"*) p="$HOME/${p#\~/}" ;; esac
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  while [ ! -d "$p" ]; do
+    tail="/$(basename "$p")$tail"
+    p="$(dirname "$p")"
+  done
+  out="$(cd -P "$p" && pwd -P)"
+  rest="${tail#/}"
+  while [ -n "$rest" ]; do
+    part="${rest%%/*}"
+    case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+    case "$part" in
+      ""|.) ;;
+      ..) out="$(dirname "$out")" ;;
+      *)  out="${out%/}/$part" ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+# True when $1 is $2 or somewhere underneath it. Both must be real_path output.
+is_within() { case "$1/" in "${2%/}/"*) return 0 ;; esac; return 1; }
+
+is_empty_dir() { [ -d "$1" ] && [ -z "$(ls -A "$1" 2>/dev/null)" ]; }
+
+looks_like_app() {
+  [ -f "$1/server.js" ] && [ -f "$1/package.json" ] \
+    && grep -q '"name": *"ultimate-baby-tracker"' "$1/package.json"
+}
+
+looks_like_data() {
+  [ -f "$1/config.json" ] || [ -f "$1/events.log" ]
+}
+
+# Update replaces the application directory wholesale and uninstall deletes it,
+# so nothing worth keeping may live inside it - and it must never be a
+# directory that holds anything else of yours. Checked before anything is
+# touched, for every action that writes.
+check_layout() {
+  local app data backups home
+  app="$(real_path "$APP_DIR")"
+  data="$(real_path "$DATA_DIR")"
+  backups="$(real_path "$BACKUP_DIR")"
+  home="$(real_path "$HOME")"
+
+  if [ "$app" = "/" ] || is_within "$home" "$app"; then
+    die "Refusing to use $APP_DIR as the application directory: it contains your home directory."
+  fi
+  if [ "$data" = "/" ] || is_within "$home" "$data"; then
+    die "Refusing to use $DATA_DIR as the data directory: it contains your home directory."
+  fi
+
+  local fix
+  if [ "$ACTION" = "install" ]; then
+    fix="Pick one outside it, e.g. --data \"$(dirname "$APP_DIR")/data\"."
+  else
+    fix="Copy that folder somewhere outside $APP_DIR first, point the service at
+  the copy with: $SELF service add --data <new path>
+  and then run this again."
+  fi
+  if is_within "$data" "$app"; then
+    die "The data directory $DATA_DIR is inside the application directory $APP_DIR.
+  Updating replaces that directory and uninstalling deletes it, so your entries
+  would go with it. $fix"
+  fi
+  if is_within "$app" "$data"; then
+    die "The application directory $APP_DIR is inside the data directory $DATA_DIR.
+  Keep them side by side instead, e.g. --dir \"$(dirname "$DATA_DIR")/app\"."
+  fi
+  if is_within "$backups" "$app"; then
+    die "The snapshot directory $BACKUP_DIR is inside the application directory
+  $APP_DIR, so an update would delete the snapshot it had just taken.
+  Pick one outside it with --backups."
+  fi
+}
+
+# Swap a freshly fetched copy into place. Only called once the copy is complete,
+# so a failed download or clone leaves the existing install as it was.
+replace_dir() {
+  local stage="$1" dest="$2"
+  rm -rf "$dest"
+  mv "$stage" "$dest"
+}
+
+# The existing directory may only be replaced if it is empty or is this app.
+# Anything else is somebody's files, and `--dir ~/Documents` must not wipe them.
+check_replaceable() {
+  local dest="$1"
+  [ -e "$dest" ] || return 0
+  is_empty_dir "$dest" && return 0
+  looks_like_app "$dest" && return 0
+  die "$dest already exists and is not an install of $APP_NAME.
+  Refusing to replace it. Pick a new or empty directory with --dir."
+}
+
 # -------------------------------------------------------------- fetch code --
 
 # Prefer a git clone: updating is then a fetch, and you can see what changed.
 # Fall back to the branch tarball where git is not installed.
 fetch_source() {
   local dest="$1"
+  check_replaceable "$dest"
   if [ -d "$dest/.git" ]; then
     step "Updating the existing checkout"
     git -C "$dest" remote set-url origin "$REPO_URL"
@@ -111,26 +215,41 @@ fetch_source() {
   fi
 
   mkdir -p "$(dirname "$dest")"
+  # Fetched beside the destination, then swapped in, so it is a rename on the
+  # same filesystem and the old copy is only removed once the new one is whole.
+  local stage
+  stage="$(dirname "$dest")/.$(basename "$dest").new.$$"
+  rm -rf "$stage"
   if have git; then
     step "Cloning $REPO_URL ($BRANCH)"
-    rm -rf "$dest"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$dest" >/dev/null 2>&1 \
-      || die "Could not clone $REPO_URL. Check the network, or the branch name."
+    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$stage" >/dev/null 2>&1 \
+      || { rm -rf "$stage"; die "Could not clone $REPO_URL. Check the network, or the branch name."; }
+    replace_dir "$stage" "$dest"
     ok "At $(git -C "$dest" rev-parse --short HEAD)"
   else
     have curl || have wget || die "Need git, curl or wget to download the app."
     have tar || die "Need tar to unpack the download."
     step "Downloading $BRANCH (git is not installed, so this is a tarball)"
-    local tmp
+    local tmp src
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
     local url="$REPO_URL/archive/refs/heads/$BRANCH.tar.gz"
-    if have curl; then curl -fsSL "$url" -o "$tmp/src.tgz"; else wget -qO "$tmp/src.tgz" "$url"; fi
-    tar -xzf "$tmp/src.tgz" -C "$tmp"
-    rm -rf "$dest"
-    mkdir -p "$dest"
+    # Cleaned up by hand rather than with a RETURN trap, which stays set after
+    # this function and then fires again with $tmp out of scope under set -u.
+    if ! { if have curl; then curl -fsSL "$url" -o "$tmp/src.tgz"; else wget -qO "$tmp/src.tgz" "$url"; fi \
+           && tar -xzf "$tmp/src.tgz" -C "$tmp"; }; then
+      rm -rf "$tmp"
+      die "Could not download $url. Check the network, or the branch name."
+    fi
     # The archive nests everything under <repo>-<branch>/.
-    cp -a "$tmp"/*-"$BRANCH"/. "$dest"/
+    for src in "$tmp"/*-"$BRANCH"; do break; done
+    if ! looks_like_app "$src"; then
+      rm -rf "$tmp"
+      die "The download from $url does not contain the app."
+    fi
+    mkdir -p "$stage"
+    cp -a "$src"/. "$stage"/
+    rm -rf "$tmp"
+    replace_dir "$stage" "$dest"
     ok "Unpacked to $dest"
     warn "Without git, 'update' re-downloads the whole tarball each time."
   fi
@@ -146,7 +265,7 @@ verify_app() {
 # with it if the data directory went along too. Say so before, not after.
 check_paths() {
   case "$APP_DIR" in
-    /tmp/*|/var/tmp/*|/dev/shm/*)
+    /tmp/*|/var/tmp/*|/dev/shm/*|/private/tmp/*|/private/var/tmp/*)
       [ "$ASSUME_YES" = "1" ] || die "Refusing to install to $APP_DIR — /tmp is cleared on reboot.
   Pick somewhere that survives: --dir \"\$HOME/.local/share/$SERVICE_NAME/app\"
   (Pass --yes if you really mean it, e.g. for a throwaway test.)"
@@ -365,9 +484,22 @@ do_update() {
 
 do_uninstall() {
   step "Uninstalling $APP_NAME"
+  # Check everything first, so a refusal leaves the service and files intact.
+  if [ -e "$APP_DIR" ] && ! looks_like_app "$APP_DIR"; then
+    die "$APP_DIR does not look like an install of $APP_NAME. Not deleting it."
+  fi
+  if [ "$PURGE" = "1" ] && [ -e "$DATA_DIR" ] \
+     && ! is_empty_dir "$DATA_DIR" && ! looks_like_data "$DATA_DIR"; then
+    die "$DATA_DIR has no config.json or events.log, so it does not look like the
+  tracker's data directory. Not deleting it."
+  fi
   service_remove
-  rm -rf "$APP_DIR"
-  ok "Removed $APP_DIR"
+  if [ -e "$APP_DIR" ]; then
+    rm -rf "$APP_DIR"
+    ok "Removed $APP_DIR"
+  else
+    ok "Nothing at $APP_DIR to remove"
+  fi
   if [ "$PURGE" = "1" ]; then
     snapshot_data
     rm -rf "$DATA_DIR"
@@ -476,6 +608,11 @@ load_unit_settings() {
   return 0
 }
 load_unit_settings
+
+case "${ACTION:-}" in
+  install|update|uninstall) check_layout ;;
+  service) if [ "$SUBACTION" = "add" ]; then check_layout; fi ;;
+esac
 
 case "${ACTION:-}" in
   install)   do_install ;;

@@ -170,9 +170,100 @@ Node.js is not installed, or is not on PATH. Node $MinNodeMajor or newer is requ
 # A git clone makes updating a fetch, and lets you see what changed. Without
 # git, fall back to the branch zip - Windows has had Expand-Archive built in
 # since PowerShell 5, so there is nothing else to install.
+# ------------------------------------------------------------- path safety --
+
+# An absolute, normalised path for comparing locations, whether or not it exists
+# yet. Relative paths are taken from the current PowerShell location. Only used
+# for the checks below; the paths written to the launcher stay as given.
+function Get-FullPath {
+  param([string]$P)
+  $abs = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($P)
+  $full = [IO.Path]::GetFullPath($abs)
+  if ($full -eq [IO.Path]::GetPathRoot($full)) { return $full }
+  return $full.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+}
+
+# True when $Child is $Parent or somewhere underneath it. Windows paths are
+# case-insensitive, so the comparison is too.
+function Test-Within {
+  param([string]$Child, [string]$Parent)
+  $sep = [IO.Path]::DirectorySeparatorChar
+  $c = (Get-FullPath $Child).TrimEnd($sep) + $sep
+  $p = (Get-FullPath $Parent).TrimEnd($sep) + $sep
+  return $c.StartsWith($p, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-IsRoot {
+  param([string]$P)
+  $full = Get-FullPath $P
+  return $full -eq [IO.Path]::GetPathRoot($full)
+}
+
+function Test-EmptyDir {
+  param([string]$P)
+  return (Test-Path $P -PathType Container) -and -not (Get-ChildItem $P -Force | Select-Object -First 1)
+}
+
+function Test-LooksLikeApp {
+  param([string]$P)
+  $pkg = Join-Path $P 'package.json'
+  if (-not (Test-Path (Join-Path $P 'server.js')) -or -not (Test-Path $pkg)) { return $false }
+  return [bool](Select-String -Path $pkg -Pattern '"name":\s*"ultimate-baby-tracker"' -Quiet)
+}
+
+function Test-LooksLikeData {
+  param([string]$P)
+  return (Test-Path (Join-Path $P 'config.json')) -or (Test-Path (Join-Path $P 'events.log'))
+}
+
+# Update replaces the application directory wholesale and uninstall deletes it,
+# so nothing worth keeping may live inside it - and it must never be a
+# directory that holds anything else of yours. Checked before anything is
+# touched, for every action that writes.
+function Assert-Layout {
+  if ((Test-IsRoot $AppDir) -or (Test-Within $HOME $AppDir)) {
+    Die "Refusing to use $AppDir as the application directory: it contains your home directory."
+  }
+  if ((Test-IsRoot $DataDir) -or (Test-Within $HOME $DataDir)) {
+    Die "Refusing to use $DataDir as the data directory: it contains your home directory."
+  }
+  if ($Action -eq 'install') {
+    $fix = "Pick one outside it, e.g. -Data `"$(Join-Path (Split-Path $AppDir -Parent) 'data')`"."
+  } else {
+    $fix = "Copy that folder somewhere outside $AppDir first, point the task at the copy`n  with: .\install.cmd service add -Data <new path>`n  and then run this again."
+  }
+  if (Test-Within $DataDir $AppDir) {
+    Die "The data directory $DataDir is inside the application directory $AppDir.`n  Updating replaces that directory and uninstalling deletes it, so your entries`n  would go with it. $fix"
+  }
+  if (Test-Within $AppDir $DataDir) {
+    Die "The application directory $AppDir is inside the data directory $DataDir.`n  Keep them side by side instead, e.g. -Dir `"$(Join-Path (Split-Path $DataDir -Parent) 'app')`"."
+  }
+  if (Test-Within $BackupDir $AppDir) {
+    Die "The snapshot directory $BackupDir is inside the application directory`n  $AppDir, so an update would delete the snapshot it had just taken.`n  Pick one outside it with -Backups."
+  }
+}
+
+# The existing directory may only be replaced if it is empty or is this app.
+# Anything else is somebody's files, and -Dir ~\Documents must not wipe them.
+function Assert-Replaceable {
+  param([string]$Dest)
+  if (-not (Test-Path $Dest)) { return }
+  if ((Test-EmptyDir $Dest) -or (Test-LooksLikeApp $Dest)) { return }
+  Die "$Dest already exists and is not an install of $AppName.`n  Refusing to replace it. Pick a new or empty directory with -Dir."
+}
+
+# Swap a freshly fetched copy into place. Only called once the copy is complete,
+# so a failed download or clone leaves the existing install as it was.
+function Set-FromStage {
+  param([string]$Stage, [string]$Dest)
+  if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
+  Move-Item $Stage $Dest
+}
+
 function Get-Source {
   param([string]$Dest)
 
+  Assert-Replaceable $Dest
   if (Test-Path (Join-Path $Dest '.git')) {
     Step 'Updating the existing checkout'
     $steps = @(
@@ -192,11 +283,19 @@ function Get-Source {
   $parent = Split-Path $Dest -Parent
   if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
 
+  # Fetched beside the destination, then swapped in, so the old copy is only
+  # removed once the new one is whole.
+  $stage = Join-Path $parent (".$(Split-Path $Dest -Leaf).new.$PID")
+  if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+
   if (Have git) {
     Step "Cloning $RepoUrl ($Branch)"
-    if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-    $r = Invoke-Native -File 'git' -Arguments @('clone', '--depth', '1', '--branch', $Branch, $RepoUrl, $Dest)
-    if ($r.Code -ne 0) { Die "Could not clone $RepoUrl (branch $Branch):`n$($r.Text)" }
+    $r = Invoke-Native -File 'git' -Arguments @('clone', '--depth', '1', '--branch', $Branch, $RepoUrl, $stage)
+    if ($r.Code -ne 0) {
+      Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+      Die "Could not clone $RepoUrl (branch $Branch):`n$($r.Text)"
+    }
+    Set-FromStage -Stage $stage -Dest $Dest
     Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')))
     return
   }
@@ -210,9 +309,12 @@ function Get-Source {
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     # The archive nests everything under <repo>-<branch>\.
     $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
-    if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-    New-Item -ItemType Directory -Path $Dest -Force | Out-Null
-    Copy-Item (Join-Path $inner.FullName '*') $Dest -Recurse -Force
+    if (-not $inner -or -not (Test-LooksLikeApp $inner.FullName)) {
+      Die "The download from $RepoUrl (branch $Branch) does not contain the app."
+    }
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    Copy-Item (Join-Path $inner.FullName '*') $stage -Recurse -Force
+    Set-FromStage -Stage $stage -Dest $Dest
     Ok "Unpacked to $Dest"
     Warn "Without git, 'update' re-downloads the whole zip each time."
   } finally {
@@ -426,6 +528,13 @@ function Invoke-Update {
 
 function Invoke-Uninstall {
   Step "Uninstalling $AppName"
+  # Check everything first, so a refusal leaves the task and files intact.
+  if ((Test-Path $AppDir) -and -not (Test-LooksLikeApp $AppDir)) {
+    Die "$AppDir does not look like an install of $AppName. Not deleting it."
+  }
+  if ($Purge -and (Test-Path $DataDir) -and -not (Test-EmptyDir $DataDir) -and -not (Test-LooksLikeData $DataDir)) {
+    Die "$DataDir has no config.json or events.log, so it does not look like the`n  tracker's data directory. Not deleting it."
+  }
   Remove-Service
   if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force; Ok "Removed $AppDir" }
   if ($Purge) {
@@ -485,6 +594,10 @@ or permit local scripts once, for your account only:
 
   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 "@
+}
+
+if ($Action -in @('install', 'update', 'uninstall') -or ($Action -eq 'service' -and $Sub -eq 'add')) {
+  Assert-Layout
 }
 
 switch ($Action) {
