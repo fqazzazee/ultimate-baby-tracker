@@ -410,7 +410,11 @@ export async function stopRunningTimer(id) {
   const session = type && supportsSides(type) ? readSession(timer) : null;
 
   try {
-    const extra = { userId: state.userId };
+    // No userId: the entry stays with whoever started the timer. Mom starts a
+    // feed and Dad's tablet stops it - it is still Mom's feed. Sending the
+    // stopper here made the server file it under them; reassigning it is what
+    // the Details sheet is for.
+    const extra = {};
     if (session) extra.data = finish(session);
     const { event } = await api.stopTimer(id, extra);
     if (session) clearSession(timer);
