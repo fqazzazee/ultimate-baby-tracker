@@ -466,6 +466,9 @@ export function openTypeSheet(typeId = null) {
         };
   }
   const t = draft;
+  // The milk picker's hidden id (see fieldHTML) is bookkeeping, not a value
+  // anybody chose, so the preset list does not spell it out.
+  const twinKeys = new Set((t.fields || []).filter((f) => f.optionsFrom === 'milks').map((f) => `${f.key}Id`));
 
   openSheet(`
     <h3>${t.id ? 'Edit button' : 'New button'}</h3>
@@ -504,7 +507,7 @@ export function openTypeSheet(typeId = null) {
     ${(t.presets || []).map((p, i) => `
       <div class="list-item">
         <div class="grow"><b>${esc(p.emoji || t.emoji)} ${esc(p.label)}</b>
-          <div class="small muted">${esc(Object.entries(p.data || {}).map(([k, v]) => `${k}: ${v}`).join(', ') || 'no preset values')}</div>
+          <div class="small muted">${esc(Object.entries(p.data || {}).filter(([k]) => !twinKeys.has(k)).map(([k, v]) => `${k}: ${v}`).join(', ') || 'no preset values')}</div>
         </div>
         <button class="btn sm" data-preset-edit="${i}" type="button">Edit</button>
         ${(t.presets || []).length > 1 ? `<button class="btn sm danger" data-preset-del="${i}" type="button">✕</button>` : ''}
@@ -1951,8 +1954,19 @@ export function openMilkSheet(milkId = null) {
       await saveConfig((draftCfg) => {
         const list = draftCfg.nutrition.milks;
         const i = list.findIndex((m) => m.id === next.id);
-        if (i >= 0) list[i] = next;
-        else list.push(next);
+        if (i >= 0) {
+          // A rename keeps the old name as an alias. Entries from before the
+          // picker stored ids name the profile only by what it was called then,
+          // and without this they would start counting as some other milk the
+          // moment "Similac Pro-Advance" became "Similac 360".
+          const was = list[i];
+          const aliases = [...(Array.isArray(was.aliases) ? was.aliases : []), was.name]
+            .filter((a, k, all) => a && a !== name && all.indexOf(a) === k);
+          list[i] = { ...was, ...next, ...(aliases.length ? { aliases } : {}) };
+          if (!aliases.length) delete list[i].aliases;
+        } else {
+          list.push(next);
+        }
       });
       sound.play('success');
       toast({ icon: next.emoji, text: `<b>${esc(name)}</b> saved`, tone: 'mint' });
@@ -1963,10 +1977,23 @@ export function openMilkSheet(milkId = null) {
       if ((cfgNow.nutrition.milks || []).length <= 1) {
         return toast({ icon: '🍼', text: 'Keep at least one milk profile', tone: 'peach' });
       }
-      if (!confirm(`Remove ${milk.name}? Entries that named it keep the name in the log.`)) return;
+      if (!confirm(`Remove ${milk.name}? It stops being offered. Feeds already logged with it keep counting its nutrition.`)) return;
       closeSheet();
       await saveConfig((draftCfg) => {
+        // Retired rather than dropped. Its panel is the only record of what
+        // those past bottles carried; throw it away and every one of them is
+        // silently recounted as breast milk or the default. Deleting cannot be
+        // refused instead, because whether any entry names the profile is a
+        // question about the whole log, and this screen holds a few days of it.
+        const gone = draftCfg.nutrition.milks.find((m) => m.id === milk.id);
         draftCfg.nutrition.milks = draftCfg.nutrition.milks.filter((m) => m.id !== milk.id);
+        if (gone) {
+          const retired = Array.isArray(draftCfg.nutrition.retiredMilks) ? draftCfg.nutrition.retiredMilks : [];
+          draftCfg.nutrition.retiredMilks = [
+            ...retired.filter((m) => m.id !== gone.id),
+            { ...gone, enabled: false, retiredAt: new Date().toISOString() },
+          ];
+        }
         if (draftCfg.nutrition.defaultMilkId === milk.id) {
           draftCfg.nutrition.defaultMilkId = draftCfg.nutrition.milks[0]?.id || null;
         }

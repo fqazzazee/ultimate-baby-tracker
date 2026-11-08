@@ -5,7 +5,7 @@ import {
   unitSystem, displayUnit, toDisplay, fromDisplay, roundCanonical, decimalsFor,
   stepFor, fmtQty,
 } from './units.js';
-import { milkEnabled, milkTypeIds } from './nutrition.js';
+import { milkEnabled, milkTypeIds, findMilk } from './nutrition.js';
 
 export const TONES = ['pink', 'sky', 'mint', 'lemon', 'lavender', 'peach'];
 
@@ -154,7 +154,7 @@ function optionName(o) {
  * `optionsFrom: 'milks'` follows whatever profiles exist in Setup -> Nutrition,
  * so adding a formula there adds it to the bottle picker with no migration.
  */
-export function resolveOptions(field, cfg, current = null) {
+export function resolveOptions(field, cfg, current = null, currentId = null) {
   if (field.options && current && !field.optionsFrom) {
     // A value typed through "Other", or one from a list since edited, stays on
     // screen as its own chip - otherwise opening an old entry silently drops
@@ -166,15 +166,17 @@ export function resolveOptions(field, cfg, current = null) {
     // A profile switched off in Setup stops being offered, but an entry that
     // already names it keeps its choice on screen - otherwise editing an old
     // bottle would silently drop what was in it.
+    // The id rides along so the chip can record it beside the name; see the
+    // twin input in fieldHTML.
     return (cfg?.nutrition?.milks || [])
-      .filter((m) => milkEnabled(m) || m.name === current || m.id === current)
-      .map((m) => ({ name: m.name, emoji: m.emoji }));
+      .filter((m) => milkEnabled(m) || m.name === current || m.id === current || m.id === currentId)
+      .map((m) => ({ name: m.name, emoji: m.emoji, id: m.id }));
   }
   return field.options || [];
 }
 
 /** Render one editable field. Values are collected back by collectFields(). */
-export function fieldHTML(field, value, cfg = null) {
+export function fieldHTML(field, value, cfg = null, data = null) {
   const key = esc(field.key);
   const lab = esc(field.label || field.key);
   const showIf = field.showIf ? ` data-showif="${esc(field.showIf)}"` : '';
@@ -191,15 +193,36 @@ export function fieldHTML(field, value, cfg = null) {
       </div>`;
 
     case 'select': {
-      const opts = resolveOptions(field, cfg, value ?? null);
+      /*
+       * The milk picker records the profile's id beside its name, in a hidden
+       * twin field (`milk` -> `milkId`). The name is what the log shows and
+       * what older entries have; the id is what survives the profile being
+       * renamed or deleted, which used to quietly recount every past feed as
+       * some other milk. An entry that predates the id gets it filled in from
+       * its name here, so editing one pins it to the profile it counts as now.
+       */
+      const milkPicker = field.optionsFrom === 'milks';
+      const twinKey = `${field.key}Id`;
+      const curId = milkPicker
+        ? (data?.[twinKey] || findMilk(cfg, { name: value ?? null })?.id || '')
+        : '';
+      const opts = resolveOptions(field, cfg, value ?? null, curId || null);
       const cur = value ?? '';
+      const isOn = (o) => {
+        if (milkPicker && curId && typeof o === 'object' && o.id) return o.id === curId;
+        return optionName(o) === cur;
+      };
       body = `<input type="hidden" data-field="${key}" data-kind="text" value="${esc(cur)}">
+        ${milkPicker ? `<input type="hidden" data-field="${esc(twinKey)}" data-kind="text"
+          data-twin-of="${key}" value="${esc(curId)}">` : ''}
         <div class="preset-row" data-choices="${key}">
           ${opts.map((o) => {
             const name = optionName(o);
+            const on = isOn(o);
             const lead = typeof o === 'object' && o.emoji ? `${esc(o.emoji)} ` : '';
-            return `<button type="button" class="btn sm" data-choose="${key}" data-value="${esc(name)}"
-              aria-pressed="${name === cur}" style="${name === cur ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${lead}${esc(name)}</button>`;
+            const id = typeof o === 'object' && o.id ? ` data-id="${esc(o.id)}"` : '';
+            return `<button type="button" class="btn sm" data-choose="${key}" data-value="${esc(name)}"${id}
+              aria-pressed="${on}" style="${on ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">${lead}${esc(name)}</button>`;
           }).join('')}
           ${field.allowOther ? `<button type="button" class="btn sm" data-other="${key}">✏️ Other…</button>` : ''}
           ${cur ? `<button type="button" class="btn sm" data-choose="${key}" data-value="">Clear</button>` : ''}
@@ -273,7 +296,7 @@ export function fieldHTML(field, value, cfg = null) {
 }
 
 export function fieldsHTML(type, data = {}, cfg = null) {
-  return (type.fields || []).map((f) => fieldHTML(f, data[f.key], cfg)).join('');
+  return (type.fields || []).map((f) => fieldHTML(f, data[f.key], cfg, data)).join('');
 }
 
 /**
@@ -338,6 +361,10 @@ export function wireFieldControls(root, onChange = () => {}) {
       const key = choose.dataset.choose;
       const input = root.querySelector(`[data-field="${CSS.escape(key)}"]`);
       if (input) input.value = choose.dataset.value;
+      // The milk picker's id travels with its name; "Clear" has no id and
+      // empties both.
+      const twin = root.querySelector(`[data-twin-of="${CSS.escape(key)}"]`);
+      if (twin) twin.value = choose.dataset.id || '';
       root.querySelectorAll(`[data-choose="${CSS.escape(key)}"]`).forEach((b) => {
         const on = b.dataset.value === choose.dataset.value && b.dataset.value !== '';
         b.setAttribute('aria-pressed', String(on));
@@ -365,6 +392,9 @@ export function wireFieldControls(root, onChange = () => {}) {
         box.oninput = () => {
           const input = root.querySelector(`[data-field="${CSS.escape(key)}"]`);
           if (input) input.value = box.value;
+          // Typed text names no profile, so it must not keep a chip's id.
+          const twin = root.querySelector(`[data-twin-of="${CSS.escape(key)}"]`);
+          if (twin) twin.value = '';
           onChange();
         };
       }
