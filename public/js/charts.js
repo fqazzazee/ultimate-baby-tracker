@@ -400,6 +400,13 @@ export function tableTwin({ rows, columns, id }) {
 /**
  * One chart card: title, optional subtitle and legend, the plot, a table
  * toggle, and the table itself. The toggle is delegated, not wired here.
+ *
+ * The subtitle is plain text and is escaped here, in the one place every card
+ * passes through. It is assembled from things people typed - a choice option,
+ * a field label, a unit - and the builders that assemble it cannot all be
+ * trusted to remember; an option named `<img onerror=...>` ran on the Stats
+ * screen for everyone who opened it. `note` stays HTML: its builders escape
+ * what they interpolate, and one of them needs a little markup.
  */
 export function chartCard({
   id, title, subtitle = '', svg, legendHTML = '', table = '', note = '',
@@ -409,11 +416,11 @@ export function chartCard({
       <p class="small muted" style="margin:8px 0 0">Nothing logged in this range yet.</p></div>`;
   }
   return `<div class="card viz-card" data-chart-card="${esc(id)}" data-chart-title="${esc(title)}"
-      data-chart-sub="${esc(stripTags(subtitle))}">
+      data-chart-sub="${esc(subtitle)}">
     <div class="viz-head">
       <div class="grow" style="flex:1;min-width:0">
         <h3>${esc(title)}</h3>
-        ${subtitle ? `<div class="small muted">${subtitle}</div>` : ''}
+        ${subtitle ? `<div class="small muted">${esc(subtitle)}</div>` : ''}
       </div>
       <div class="viz-tools">
         <button class="btn sm" data-act="viz-table" data-viz-table="${esc(id)}"
@@ -427,11 +434,6 @@ export function chartCard({
     ${note ? `<p class="small muted" style="margin:8px 0 0">${note}</p>` : ''}
     ${table}
   </div>`;
-}
-
-/** Subtitles carry a little markup; the exported image wants plain text. */
-function stripTags(html) {
-  return String(html).replace(/<[^>]*>/g, '');
 }
 
 /* --------------------------------------------------------------- download */

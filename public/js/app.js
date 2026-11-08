@@ -17,7 +17,9 @@ import {
   renderTrack, renderHistory, renderAlarms, openNutrientSheet,
   loadNutrition, nutritionKey,
 } from './views.js';
-import { renderStats, loadStats, statsKey } from './stats.js';
+import {
+  renderStats, loadStats, statsKey, statsScope,
+} from './stats.js';
 import { openReportSheet } from './report.js';
 import { toggleTable, downloadChart } from './charts.js';
 import { wireTips } from './tips.js';
@@ -302,8 +304,13 @@ function chartFooter() {
 /** Fetch the Statistics slice if what we hold is for another baby or range. */
 async function ensureStats() {
   if (state.tab !== 'stats' || state.stats.key === statsKey()) return;
-  state.stats = { ...state.stats, loading: true, error: null };
-  render();
+  // Another baby or range has nothing worth showing until it arrives. The same
+  // one at a newer revision - something was logged since - is refetched behind
+  // the charts already drawn, rather than blanking them for a moment.
+  if (state.stats.scope !== statsScope() || state.stats.error) {
+    state.stats = { ...state.stats, loading: true, error: null };
+    render();
+  }
   await loadStats();
   render();
 }

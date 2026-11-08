@@ -21,6 +21,7 @@ import {
 import { supportsSides } from './feeding.js';
 import {
   customChartTypes, customChartOn, chartableMetrics, chartGroups, combineCharts, stackCharts,
+  canShareChart,
   AGGREGATIONS,
 } from './stats.js';
 
@@ -453,19 +454,35 @@ const FIELD_KINDS = [
   { value: 'duration', label: 'Duration' },
 ];
 
+/**
+ * Open the button editor from Setup's list.
+ *
+ * Always starts from a fresh copy of the config. The draft used to be reused
+ * whenever it was for the same button, which was meant for coming back from
+ * the field and preset sub-sheets - but a sheet dismissed with Escape or the
+ * backdrop never cleared it, so the next Edit brought back the abandoned
+ * changes, and a Save then wrote back a stale copy over anything changed since
+ * (tracked or not, its place in the order). The sub-sheets return through
+ * `renderTypeSheet`, which is the only path that keeps a draft.
+ */
 export function openTypeSheet(typeId = null) {
-  const cfg = config();
-  if (!draft || draft.id !== typeId) {
-    const found = cfg.eventTypes.find((t) => t.id === typeId);
-    draft = found
-      ? structuredClone(found)
-      : {
-          id: null, label: '', emoji: '⭐', tone: 'lavender', mode: 'instant',
-          sound: 'chime', order: 500, fields: [], presets: [{ id: uid('p'), label: 'Log', emoji: '⭐', data: {} }],
-          builtin: false, archived: false,
-        };
-  }
+  const found = config().eventTypes.find((t) => t.id === typeId);
+  draft = found
+    ? structuredClone(found)
+    : {
+        id: null, label: '', emoji: '⭐', tone: 'lavender', mode: 'instant',
+        sound: 'chime', order: 500, fields: [], presets: [{ id: uid('p'), label: 'Log', emoji: '⭐', data: {} }],
+        builtin: false, archived: false,
+      };
+  renderTypeSheet();
+}
+
+/** The editor itself, drawn from `draft` as it stands. */
+function renderTypeSheet() {
   const t = draft;
+  // The milk picker's hidden id (see fieldHTML) is bookkeeping, not a value
+  // anybody chose, so the preset list does not spell it out.
+  const twinKeys = new Set((t.fields || []).filter((f) => f.optionsFrom === 'milks').map((f) => `${f.key}Id`));
 
   openSheet(`
     <h3>${t.id ? 'Edit button' : 'New button'}</h3>
@@ -504,7 +521,7 @@ export function openTypeSheet(typeId = null) {
     ${(t.presets || []).map((p, i) => `
       <div class="list-item">
         <div class="grow"><b>${esc(p.emoji || t.emoji)} ${esc(p.label)}</b>
-          <div class="small muted">${esc(Object.entries(p.data || {}).map(([k, v]) => `${k}: ${v}`).join(', ') || 'no preset values')}</div>
+          <div class="small muted">${esc(Object.entries(p.data || {}).filter(([k]) => !twinKeys.has(k)).map(([k, v]) => `${k}: ${v}`).join(', ') || 'no preset values')}</div>
         </div>
         <button class="btn sm" data-preset-edit="${i}" type="button">Edit</button>
         ${(t.presets || []).length > 1 ? `<button class="btn sm danger" data-preset-del="${i}" type="button">✕</button>` : ''}
@@ -549,7 +566,7 @@ export function openTypeSheet(typeId = null) {
       b.addEventListener('click', () => {
         sync();
         draft.fields.splice(Number(b.dataset.fieldDel), 1);
-        openTypeSheet(draft.id);
+        renderTypeSheet();
       }));
 
     sheet.querySelector('[data-preset-add]').addEventListener('click', () => { sync(); openPresetSheet(-1); });
@@ -559,7 +576,7 @@ export function openTypeSheet(typeId = null) {
       b.addEventListener('click', () => {
         sync();
         draft.presets.splice(Number(b.dataset.presetDel), 1);
-        openTypeSheet(draft.id);
+        renderTypeSheet();
       }));
 
     sheet.querySelector('[data-cancel]').addEventListener('click', () => { draft = null; closeSheet(); });
@@ -572,7 +589,11 @@ export function openTypeSheet(typeId = null) {
       closeSheet();
       await saveConfig((cfgDraft) => {
         const i = cfgDraft.eventTypes.findIndex((x) => x.id === next.id);
-        if (i >= 0) cfgDraft.eventTypes[i] = next;
+        // Where it sits and whether it is tracked are set elsewhere in Setup,
+        // never in this sheet, so they are taken from the config as it is now
+        // rather than from when the sheet opened.
+        const { order, archived } = cfgDraft.eventTypes[i] || {};
+        if (i >= 0) cfgDraft.eventTypes[i] = { ...next, order, archived };
         else cfgDraft.eventTypes.push({ ...next, order: (cfgDraft.eventTypes.length + 1) * 10 });
       });
       sound.play(next.sound || 'success');
@@ -692,7 +713,7 @@ function openFieldSheet(index) {
     unitBox.addEventListener('input', sayUnit);
     sayUnit();
 
-    sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
+    sheet.querySelector('[data-back]').addEventListener('click', () => renderTypeSheet());
 
     sheet.querySelector('[data-save]').addEventListener('click', () => {
       const label = sheet.querySelector('[data-meta="label"]').value.trim();
@@ -721,7 +742,7 @@ function openFieldSheet(index) {
       };
       if (index >= 0) draft.fields[index] = next;
       else draft.fields.push(next);
-      openTypeSheet(draft.id);
+      renderTypeSheet();
     });
   });
 }
@@ -763,7 +784,7 @@ function openPresetSheet(index) {
   `, (sheet) => {
     wirePickers(sheet);
     wireFieldControls(sheet.querySelector('[data-fields]'));
-    sheet.querySelector('[data-back]').addEventListener('click', () => openTypeSheet(draft.id));
+    sheet.querySelector('[data-back]').addEventListener('click', () => renderTypeSheet());
     sheet.querySelector('[data-save]').addEventListener('click', () => {
       const label = sheet.querySelector('[data-meta="label"]').value.trim();
       if (!label) return toast({ icon: '✏️', text: 'Button needs a label', tone: 'peach' });
@@ -775,12 +796,41 @@ function openPresetSheet(index) {
       };
       if (index >= 0) draft.presets[index] = next;
       else draft.presets.push(next);
-      openTypeSheet(draft.id);
+      renderTypeSheet();
     });
   });
 }
 
 /* ------------------------------------------------------------ alarm sheet */
+
+/**
+ * A typed time of day as "HH:MM", or null when it cannot be read.
+ *
+ * The app shows a 12-hour clock by default, so that is how people type into
+ * the times box: "8:00 PM", "8pm", "8 p.m.", or "20.00". The server only ever
+ * needs one form, and the list should show the time it will actually ring at,
+ * so everything is normalised here on save. A bare "8" is refused rather than
+ * guessed at - morning medicine and evening medicine are not interchangeable.
+ *
+ * The same grammar as `parseClock` in lib/alarms.js, which still has to read
+ * configs saved before this normalised them; keep the two in step.
+ */
+export function clockTime(text) {
+  const m = /^(\d{1,2})(?:[:.h](\d{2}))?\s*(?:([ap])\.?\s*m?\.?)?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const half = m[3] ? m[3].toLowerCase() : null;
+  if (m[2] === undefined && !half) return null;
+  let h = Number(m[1]);
+  const min = m[2] === undefined ? 0 : Number(m[2]);
+  if (min > 59) return null;
+  if (half) {
+    if (h < 1 || h > 12) return null;
+    h = (h % 12) + (half === 'p' ? 12 : 0);
+  } else if (h > 23) {
+    return null;
+  }
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
 
 export function openAlarmSheet(alarmId = null) {
   const cfg = config();
@@ -816,7 +866,7 @@ export function openAlarmSheet(alarmId = null) {
     </div>
 
     <div data-when-timeofday class="${alarm.mode === 'timeOfDay' ? '' : 'hidden'}">
-      <label class="field"><span class="lab">Times of day — one per line (HH:MM)</span>
+      <label class="field"><span class="lab">Times of day — one per line (20:00 or 8:00 pm)</span>
         <textarea data-meta="times" placeholder="08:00&#10;20:00">${esc((alarm.times || []).join('\n'))}</textarea>
       </label>
     </div>
@@ -910,6 +960,25 @@ export function openAlarmSheet(alarmId = null) {
       if (mode === 'sinceLast' && !picked.size) {
         return toast({ icon: '👆', text: 'Pick at least one button to watch', tone: 'peach' });
       }
+      // Every line is read the way the server will read it. In "At time" mode
+      // a line that cannot be is refused here, by name, rather than saved and
+      // never rung; in the other modes the box is hidden and not used, so what
+      // it holds is tidied where possible and otherwise left alone.
+      const lines = sheet.querySelector('[data-meta="times"]').value.split('\n').map((x) => x.trim()).filter(Boolean);
+      const unread = lines.filter((x) => clockTime(x) === null);
+      if (mode === 'timeOfDay' && unread.length) {
+        return toast({
+          icon: '⏰',
+          text: `Couldn't read ${unread.map((x) => `“${esc(x)}”`).join(', ')} as a time. Write it like 20:00 or 8:00 pm.`,
+          tone: 'peach',
+          ms: 7000,
+        });
+      }
+      if (mode === 'timeOfDay' && !lines.length) {
+        return toast({ icon: '⏰', text: 'Add at least one time of day', tone: 'peach' });
+      }
+      const times = [...new Set(lines.map((x) => clockTime(x) || x))];
+      if (mode === 'timeOfDay') times.sort();
       const quietOn = sheet.querySelector('[data-meta="quietOn"]').checked;
       const next = {
         id: alarm.id || uid('a'),
@@ -920,7 +989,7 @@ export function openAlarmSheet(alarmId = null) {
         typeIds: [...picked],
         babyId: sheet.querySelector('[data-meta="babyId"]').value,
         everyMinutes: Math.max(1, Number(sheet.querySelector('[data-meta="everyMinutes"]').value) || 180),
-        times: sheet.querySelector('[data-meta="times"]').value.split('\n').map((s) => s.trim()).filter(Boolean),
+        times,
         leadMinutes: 0,
         snoozeMinutes: Math.max(1, Number(sheet.querySelector('[data-meta="snoozeMinutes"]').value) || 10),
         sound: alarm.sound || 'chime',
@@ -1185,14 +1254,16 @@ function pairLine(pair) {
  * asked for would be noise on the screen that lists them, and one of them would
  * eventually be wrong for somebody. Offered here instead, so the arithmetic is
  * a tap rather than a search, and every one stays editable afterwards.
+ *
+ * Every metric side here must be a unit that is not built in: a metric unit
+ * converts one way only, and mL (to fl oz) and kg (to lb) already do, so
+ * "ml ⇄ tsp" and "kg ⇄ st" were starters that Save then refused.
  */
 const UNIT_SUGGESTIONS = [
   { label: 'g ⇄ oz', metric: 'g', us: 'oz', per: 28.349523125, metricDp: 0, usDp: 2 },
-  { label: 'kg ⇄ st', metric: 'kg', us: 'st', per: 6.35029318, metricDp: 2, usDp: 2 },
   { label: 'm ⇄ ft', metric: 'm', us: 'ft', per: 0.3048, metricDp: 2, usDp: 1 },
   { label: 'mm ⇄ in', metric: 'mm', us: 'in', per: 25.4, metricDp: 0, usDp: 2 },
   { label: 'km ⇄ mi', metric: 'km', us: 'mi', per: 1.609344, metricDp: 2, usDp: 2 },
-  { label: 'ml ⇄ tsp', metric: 'mL', us: 'tsp', per: 4.92892159375, metricDp: 1, usDp: 2 },
   { label: 'L ⇄ gal', metric: 'L', us: 'gal', per: 3.785411784, metricDp: 2, usDp: 2 },
 ];
 
@@ -1540,7 +1611,8 @@ function statsCard(cfg) {
  * drawn, rather than drawn and doing nothing.
  */
 function combinable(cfg, type) {
-  const on = chartableMetrics(type).filter((m) => customChartOn(cfg, type, m.key));
+  const on = chartableMetrics(type)
+    .filter((m) => customChartOn(cfg, type, m.key) && canShareChart(m));
   const seen = new Map();
   for (const m of on) {
     const key = `${m.agg}|${m.unit || ''}`;
@@ -1558,7 +1630,7 @@ function combineHint(cfg, type) {
       ? `${pairs.map((g) => g.map((m) => m.label).join(' + ')).join(', ')} share a chart`
       : 'On, but nothing here shares a unit yet';
   }
-  return 'One chart each. Only measures in the same unit, summarised the same way, can share one';
+  return 'One chart each. Only totals and counts in the same unit can share one — a latest or an average stays a line of its own';
 }
 
 /**
@@ -1951,8 +2023,19 @@ export function openMilkSheet(milkId = null) {
       await saveConfig((draftCfg) => {
         const list = draftCfg.nutrition.milks;
         const i = list.findIndex((m) => m.id === next.id);
-        if (i >= 0) list[i] = next;
-        else list.push(next);
+        if (i >= 0) {
+          // A rename keeps the old name as an alias. Entries from before the
+          // picker stored ids name the profile only by what it was called then,
+          // and without this they would start counting as some other milk the
+          // moment "Similac Pro-Advance" became "Similac 360".
+          const was = list[i];
+          const aliases = [...(Array.isArray(was.aliases) ? was.aliases : []), was.name]
+            .filter((a, k, all) => a && a !== name && all.indexOf(a) === k);
+          list[i] = { ...was, ...next, ...(aliases.length ? { aliases } : {}) };
+          if (!aliases.length) delete list[i].aliases;
+        } else {
+          list.push(next);
+        }
       });
       sound.play('success');
       toast({ icon: next.emoji, text: `<b>${esc(name)}</b> saved`, tone: 'mint' });
@@ -1963,10 +2046,23 @@ export function openMilkSheet(milkId = null) {
       if ((cfgNow.nutrition.milks || []).length <= 1) {
         return toast({ icon: '🍼', text: 'Keep at least one milk profile', tone: 'peach' });
       }
-      if (!confirm(`Remove ${milk.name}? Entries that named it keep the name in the log.`)) return;
+      if (!confirm(`Remove ${milk.name}? It stops being offered. Feeds already logged with it keep counting its nutrition.`)) return;
       closeSheet();
       await saveConfig((draftCfg) => {
+        // Retired rather than dropped. Its panel is the only record of what
+        // those past bottles carried; throw it away and every one of them is
+        // silently recounted as breast milk or the default. Deleting cannot be
+        // refused instead, because whether any entry names the profile is a
+        // question about the whole log, and this screen holds a few days of it.
+        const gone = draftCfg.nutrition.milks.find((m) => m.id === milk.id);
         draftCfg.nutrition.milks = draftCfg.nutrition.milks.filter((m) => m.id !== milk.id);
+        if (gone) {
+          const retired = Array.isArray(draftCfg.nutrition.retiredMilks) ? draftCfg.nutrition.retiredMilks : [];
+          draftCfg.nutrition.retiredMilks = [
+            ...retired.filter((m) => m.id !== gone.id),
+            { ...gone, enabled: false, retiredAt: new Date().toISOString() },
+          ];
+        }
         if (draftCfg.nutrition.defaultMilkId === milk.id) {
           draftCfg.nutrition.defaultMilkId = draftCfg.nutrition.milks[0]?.id || null;
         }
