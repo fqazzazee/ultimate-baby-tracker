@@ -285,11 +285,17 @@ export function fieldsHTML(type, data = {}, cfg = null) {
  * exactly. That guard is not a nicety: without it, opening an entry in US units
  * and pressing Save would store 29.57 where 30 had been, and again on the next
  * edit, and again.
+ *
+ * A field that applyShowIf() has hidden is skipped. Its box still holds
+ * whatever it held - untick Poop on a Mustard diaper and the colour is still
+ * Mustard underneath - and saving it would make History read "Wet · Mustard"
+ * and keep the colour's alert pill showing for a wet nappy.
  */
 export function collectFields(root, cfg = null) {
   const sys = unitSystem(cfg);
   const out = {};
   root.querySelectorAll('[data-field]').forEach((el) => {
+    if (hiddenByShowIf(el)) return;
     const key = el.dataset.field;
     if (el.dataset.kind === 'toggle') {
       if (el.checked) out[key] = true;
@@ -307,6 +313,11 @@ export function collectFields(root, cfg = null) {
     }
   });
   return out;
+}
+
+/** True when `el` sits inside a field applyShowIf() has hidden. */
+function hiddenByShowIf(el) {
+  return el.closest('[data-showif].hidden') !== null;
 }
 
 /**
