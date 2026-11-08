@@ -802,6 +802,35 @@ function openPresetSheet(index) {
 
 /* ------------------------------------------------------------ alarm sheet */
 
+/**
+ * A typed time of day as "HH:MM", or null when it cannot be read.
+ *
+ * The app shows a 12-hour clock by default, so that is how people type into
+ * the times box: "8:00 PM", "8pm", "8 p.m.", or "20.00". The server only ever
+ * needs one form, and the list should show the time it will actually ring at,
+ * so everything is normalised here on save. A bare "8" is refused rather than
+ * guessed at - morning medicine and evening medicine are not interchangeable.
+ *
+ * The same grammar as `parseClock` in lib/alarms.js, which still has to read
+ * configs saved before this normalised them; keep the two in step.
+ */
+export function clockTime(text) {
+  const m = /^(\d{1,2})(?:[:.h](\d{2}))?\s*(?:([ap])\.?\s*m?\.?)?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const half = m[3] ? m[3].toLowerCase() : null;
+  if (m[2] === undefined && !half) return null;
+  let h = Number(m[1]);
+  const min = m[2] === undefined ? 0 : Number(m[2]);
+  if (min > 59) return null;
+  if (half) {
+    if (h < 1 || h > 12) return null;
+    h = (h % 12) + (half === 'p' ? 12 : 0);
+  } else if (h > 23) {
+    return null;
+  }
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
 export function openAlarmSheet(alarmId = null) {
   const cfg = config();
   const alarm = cfg.alarms.find((a) => a.id === alarmId) || {
@@ -836,7 +865,7 @@ export function openAlarmSheet(alarmId = null) {
     </div>
 
     <div data-when-timeofday class="${alarm.mode === 'timeOfDay' ? '' : 'hidden'}">
-      <label class="field"><span class="lab">Times of day — one per line (HH:MM)</span>
+      <label class="field"><span class="lab">Times of day — one per line (20:00 or 8:00 pm)</span>
         <textarea data-meta="times" placeholder="08:00&#10;20:00">${esc((alarm.times || []).join('\n'))}</textarea>
       </label>
     </div>
@@ -930,6 +959,25 @@ export function openAlarmSheet(alarmId = null) {
       if (mode === 'sinceLast' && !picked.size) {
         return toast({ icon: '👆', text: 'Pick at least one button to watch', tone: 'peach' });
       }
+      // Every line is read the way the server will read it. In "At time" mode
+      // a line that cannot be is refused here, by name, rather than saved and
+      // never rung; in the other modes the box is hidden and not used, so what
+      // it holds is tidied where possible and otherwise left alone.
+      const lines = sheet.querySelector('[data-meta="times"]').value.split('\n').map((x) => x.trim()).filter(Boolean);
+      const unread = lines.filter((x) => clockTime(x) === null);
+      if (mode === 'timeOfDay' && unread.length) {
+        return toast({
+          icon: '⏰',
+          text: `Couldn't read ${unread.map((x) => `“${esc(x)}”`).join(', ')} as a time. Write it like 20:00 or 8:00 pm.`,
+          tone: 'peach',
+          ms: 7000,
+        });
+      }
+      if (mode === 'timeOfDay' && !lines.length) {
+        return toast({ icon: '⏰', text: 'Add at least one time of day', tone: 'peach' });
+      }
+      const times = [...new Set(lines.map((x) => clockTime(x) || x))];
+      if (mode === 'timeOfDay') times.sort();
       const quietOn = sheet.querySelector('[data-meta="quietOn"]').checked;
       const next = {
         id: alarm.id || uid('a'),
@@ -940,7 +988,7 @@ export function openAlarmSheet(alarmId = null) {
         typeIds: [...picked],
         babyId: sheet.querySelector('[data-meta="babyId"]').value,
         everyMinutes: Math.max(1, Number(sheet.querySelector('[data-meta="everyMinutes"]').value) || 180),
-        times: sheet.querySelector('[data-meta="times"]').value.split('\n').map((s) => s.trim()).filter(Boolean),
+        times,
         leadMinutes: 0,
         snoozeMinutes: Math.max(1, Number(sheet.querySelector('[data-meta="snoozeMinutes"]').value) || 10),
         sound: alarm.sound || 'chime',
