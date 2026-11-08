@@ -67,15 +67,51 @@ if (-not $localAppData) { $localAppData = Join-Path $HOME '.local/share' }
 if (-not $localAppData) { throw 'Cannot work out where to install: neither LOCALAPPDATA nor HOME is set.' }
 
 $root      = Join-Path $localAppData 'UltimateBabyTracker'
+$LogFile   = Join-Path $root 'service.log'
+$VbsShim   = Join-Path $root 'run-hidden.vbs'
+$CmdShim   = Join-Path $root 'run.cmd'
+
+<#
+  The settings the existing launcher was written with.
+
+  Without this, 'update', 'service add' or 'status' run without the original
+  -Port, -Listen, -Data or -Dir would rewrite the launcher with the defaults:
+  the server would come back on an empty data directory and every entry would
+  look lost. run.cmd is the record, as the systemd unit is for install.sh, so
+  installs made before this existed are covered too. Lines it does not
+  recognise are ignored, and a missing file gives nothing.
+
+  cmd.exe reads %% in a batch file as a single %, so that is undone here
+  (Write-Shim doubles them).
+#>
+function Read-ShimSettings {
+  param([string]$Path)
+  $found = @{}
+  if (-not (Test-Path -LiteralPath $Path)) { return $found }
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    if ($line -match '^\s*set\s+"BT_(PORT|HOST|DATA_DIR)=(.*)"\s*$') {
+      $found[$Matches[1]] = $Matches[2].Replace('%%', '%')
+    } elseif ($line -match '^\s*cd\s+/d\s+"(.*)"\s*$') {
+      $found['APP_DIR'] = $Matches[1].Replace('%%', '%')
+    }
+  }
+  return $found
+}
+
+# Whatever is given on the command line wins; anything left out comes from
+# the launcher, and only then from the defaults.
+$saved = Read-ShimSettings $CmdShim
+if (-not $PSBoundParameters.ContainsKey('Port') -and $saved['PORT'] -match '^\d+$') { $Port = [int]$saved['PORT'] }
+if (-not $PSBoundParameters.ContainsKey('Listen') -and $saved['HOST']) { $Listen = $saved['HOST'] }
+if (-not $Data -and $saved['DATA_DIR']) { $Data = $saved['DATA_DIR'] }
+if (-not $Dir -and $saved['APP_DIR']) { $Dir = $saved['APP_DIR'] }
+
 $AppDir    = if ($Dir)  { $Dir }  else { Join-Path $root 'app' }
 $DataDir   = if ($Data) { $Data } else { Join-Path $root 'data' }
 # Snapshots live beside the data they protect, so moving the data moves them.
 $BackupDir = if ($Backups) { $Backups }
              elseif ($Data) { Join-Path (Split-Path $DataDir -Parent) 'backups' }
              else { Join-Path $root 'backups' }
-$LogFile   = Join-Path $root 'service.log'
-$VbsShim   = Join-Path $root 'run-hidden.vbs'
-$CmdShim   = Join-Path $root 'run.cmd'
 
 # ------------------------------------------------------------------- output --
 
@@ -230,7 +266,7 @@ function Assert-Layout {
   if ($Action -eq 'install') {
     $fix = "Pick one outside it, e.g. -Data `"$(Join-Path (Split-Path $AppDir -Parent) 'data')`"."
   } else {
-    $fix = "Copy that folder somewhere outside $AppDir first, point the task at the copy`n  with: .\install.cmd service add -Data <new path>`n  and then run this again."
+    $fix = "Copy that folder somewhere outside $AppDir first, point the task at the copy`n  with: $(Get-LauncherHint) service add -Data <new path>`n  and then run this again."
   }
   if (Test-Within $DataDir $AppDir) {
     Die "The data directory $DataDir is inside the application directory $AppDir.`n  Updating replaces that directory and uninstalling deletes it, so your entries`n  would go with it. $fix"
@@ -254,30 +290,58 @@ function Assert-Replaceable {
 
 # Swap a freshly fetched copy into place. Only called once the copy is complete,
 # so a failed download or clone leaves the existing install as it was.
+#
+# The old copy is moved aside before it is deleted, not deleted where it is:
+# Windows will not rename a directory that a running program is using, so if
+# anything still holds it this fails before a single file is gone, instead of
+# halfway through deleting it.
 function Set-FromStage {
   param([string]$Stage, [string]$Dest)
-  if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-  Move-Item $Stage $Dest
+  if (-not (Test-Path $Dest)) { Move-Item $Stage $Dest; return }
+  $old = Join-Path (Split-Path $Dest -Parent) (".$(Split-Path $Dest -Leaf).old.$PID")
+  try {
+    Move-Item $Dest $old
+  } catch {
+    Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue
+    Die "Could not replace ${Dest}: $($_.Exception.Message)`n  Something is still using it - the tracker itself, or a window open on that`n  folder. Stop it, close the window, and run this again."
+  }
+  try {
+    Move-Item $Stage $Dest
+  } catch {
+    Move-Item $old $Dest
+    throw
+  }
+  Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path $old) { Warn "Could not delete the previous copy at $old; it is safe to remove by hand." }
 }
 
+<#
+  Fetching and switching are two steps, so 'update' can do everything that
+  needs the network - the part most likely to fail - while the old version is
+  still running, and stop it only once there is something to switch to.
+
+  Get-Source fetches without touching $Dest and returns what Set-Source needs:
+  for a git checkout, the fetched origin/<branch>; otherwise a complete copy
+  staged beside $Dest. Neither goes anywhere near the data directory.
+#>
 function Get-Source {
   param([string]$Dest)
 
   Assert-Replaceable $Dest
   if (Test-Path (Join-Path $Dest '.git')) {
-    Step 'Updating the existing checkout'
+    Step "Fetching $Branch"
+    # The refspec is spelled out because the checkout is a shallow clone of a
+    # single branch: a bare 'fetch origin dev' fetches dev but records no
+    # origin/dev, and the checkout in Set-Source then fails with "not a commit".
     $steps = @(
       @('remote', 'set-url', 'origin', $RepoUrl),
-      @('fetch', '--depth', '1', 'origin', $Branch),
-      @('checkout', '-q', '-B', $Branch, "origin/$Branch"),
-      @('reset', '--hard', '-q', "origin/$Branch")
+      @('fetch', '--depth', '1', 'origin', "+refs/heads/${Branch}:refs/remotes/origin/$Branch")
     )
     foreach ($step in $steps) {
       $r = Invoke-Native -File 'git' -Arguments (@('-C', $Dest) + $step)
       if ($r.Code -ne 0) { Die "git $($step -join ' ') failed:`n$($r.Text)" }
     }
-    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')) + " on $Branch")
-    return
+    return [pscustomobject]@{ Kind = 'git'; Stage = $null }
   }
 
   $parent = Split-Path $Dest -Parent
@@ -295,9 +359,7 @@ function Get-Source {
       Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
       Die "Could not clone $RepoUrl (branch $Branch):`n$($r.Text)"
     }
-    Set-FromStage -Stage $stage -Dest $Dest
-    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')))
-    return
+    return [pscustomobject]@{ Kind = 'clone'; Stage = $stage }
   }
 
   Step "Downloading $Branch (git is not installed, so this is a zip)"
@@ -305,7 +367,11 @@ function Get-Source {
   New-Item -ItemType Directory -Path $tmp -Force | Out-Null
   try {
     $zip = Join-Path $tmp 'src.zip'
-    Invoke-WebRequest -Uri "$RepoUrl/archive/refs/heads/$Branch.zip" -OutFile $zip -UseBasicParsing
+    try {
+      Invoke-WebRequest -Uri "$RepoUrl/archive/refs/heads/$Branch.zip" -OutFile $zip -UseBasicParsing
+    } catch {
+      Die "Could not download $RepoUrl (branch $Branch): $($_.Exception.Message)"
+    }
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     # The archive nests everything under <repo>-<branch>\.
     $inner = Get-ChildItem $tmp -Directory | Select-Object -First 1
@@ -314,11 +380,36 @@ function Get-Source {
     }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item (Join-Path $inner.FullName '*') $stage -Recurse -Force
-    Set-FromStage -Stage $stage -Dest $Dest
-    Ok "Unpacked to $Dest"
-    Warn "Without git, 'update' re-downloads the whole zip each time."
+  } catch {
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+    throw
   } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  return [pscustomobject]@{ Kind = 'zip'; Stage = $stage }
+}
+
+# Put in place what Get-Source fetched.
+function Set-Source {
+  param([object]$Fetched, [string]$Dest)
+
+  if ($Fetched.Kind -eq 'git') {
+    # -f discards local edits to the app directory, which is not the place for
+    # them. Without it a dirty tree makes the checkout refuse ("Please commit
+    # your changes"), and every update after that fails the same way.
+    $step = @('checkout', '-q', '-f', '-B', $Branch, "origin/$Branch")
+    $r = Invoke-Native -File 'git' -Arguments (@('-C', $Dest) + $step)
+    if ($r.Code -ne 0) { Die "git $($step -join ' ') failed:`n$($r.Text)" }
+    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')) + " on $Branch")
+    return
+  }
+
+  Set-FromStage -Stage $Fetched.Stage -Dest $Dest
+  if ($Fetched.Kind -eq 'clone') {
+    Ok ("At " + (Native-Line -File 'git' -Arguments @('-C', $Dest, 'rev-parse', '--short', 'HEAD')))
+  } else {
+    Ok "Unpacked to $Dest"
+    Warn "Without git, 'update' re-downloads the whole zip each time."
   }
 }
 
@@ -368,22 +459,69 @@ function Backup-Data {
 # .cmd that sets the environment and redirects the log, and a one-line .vbs that
 # starts the .cmd with the window hidden. Splitting them keeps the quoting in
 # the batch file, where it behaves, instead of nested inside a VBScript string.
+#
+# Every path in the .cmd is absolute. The task does not start in the current
+# directory, so a relative -Dir or -Data would point somewhere else; and the
+# full path to server.js on node's command line is what Get-AppProcess looks
+# for to tell this install's server from any other node program.
 function Write-Shim {
   param([string]$NodePath)
 
+  # With -Dir and -Data both elsewhere, nothing else has created it yet.
+  if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
+
+  # A % in a path would be read by cmd.exe as the start of a variable; %%
+  # is a literal one. Read-ShimSettings undoes this.
+  $app = Get-FullPath $AppDir
+  $q = @{
+    App    = $app.Replace('%', '%%')
+    Data   = (Get-FullPath $DataDir).Replace('%', '%%')
+    Server = (Join-Path $app 'server.js').Replace('%', '%%')
+    Node   = $NodePath.Replace('%', '%%')
+    Log    = $LogFile.Replace('%', '%%')
+  }
   @"
 @echo off
-rem Generated by install.ps1 - do not edit; run 'install.cmd service add' instead.
+rem Generated by install.ps1, which also reads its settings back from here:
+rem a later update or service add keeps them unless told otherwise.
+rem Do not edit; run 'install.cmd service add -Port ... -Data ...' instead.
 set "BT_PORT=$Port"
 set "BT_HOST=$Listen"
-set "BT_DATA_DIR=$DataDir"
-cd /d "$AppDir"
-"$NodePath" "server.js" >> "$LogFile" 2>&1
+set "BT_DATA_DIR=$($q.Data)"
+cd /d "$($q.App)"
+"$($q.Node)" "$($q.Server)" >> "$($q.Log)" 2>&1
+exit /b %ERRORLEVEL%
 "@ | Set-Content -Path $CmdShim -Encoding ASCII
 
+  # The .vbs waits for the server (Run's third argument) instead of returning
+  # at once, so the task stays Running exactly as long as node does, and it
+  # starts node again when it exits with an error - the crash restart the
+  # task promises. Task Scheduler's own RestartCount is not relied on for
+  # that: in practice it retries a task that failed to start, not one whose
+  # program started and later exited with an error. It stays set for the case
+  # it does cover, wscript itself failing to launch.
+  #
+  # A clean exit (0) is left stopped, as systemd's Restart=on-failure does.
+  # Five failures in a row, each within a minute of starting, mean something
+  # is wrong that retrying will not fix - a port in use, a missing node - so
+  # it gives up rather than filling the log; the reason is in service.log.
+  # 'stop' ends this script before it kills node, so it never sees that exit.
   @"
-' Generated by install.ps1 - starts the tracker with no console window.
-CreateObject("WScript.Shell").Run """$CmdShim""", 0, False
+' Generated by install.ps1 - runs the tracker with no console window, and
+' starts it again if it stops with an error.
+Option Explicit
+Dim shell, code, started, quick
+Set shell = CreateObject("WScript.Shell")
+quick = 0
+Do
+  started = Now
+  code = shell.Run("""$CmdShim""", 0, True)
+  If code = 0 Then Exit Do
+  If DateDiff("s", started, Now) < 60 Then quick = quick + 1 Else quick = 0
+  If quick >= 5 Then Exit Do
+  WScript.Sleep 5000
+Loop
+WScript.Quit code
 "@ | Set-Content -Path $VbsShim -Encoding ASCII
 
   Ok "Launcher written to $VbsShim"
@@ -396,9 +534,14 @@ function Add-Service {
   $node = Get-NodePath
   Assert-App
   Step 'Registering the logon task'
+  # Recreating the task does not end the copy the old one started, and the
+  # new one would then fail to bind the port it still holds.
+  Stop-App
   Write-Shim -NodePath $node
 
-  $action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$VbsShim`"" -WorkingDirectory $AppDir
+  # //B is batch mode: should the .vbs ever hit an error, wscript exits with it
+  # instead of putting up a message box nobody asked to see at logon.
+  $action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "//B `"$VbsShim`"" -WorkingDirectory (Get-FullPath $AppDir)
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $settings = New-ScheduledTaskSettingsSet `
       -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -433,23 +576,62 @@ function Remove-Service {
   Process ids of the copy running out of *this* install directory, so a second
   tracker elsewhere on the machine is never stopped by mistake.
 
+  A node process counts when either
+    - its command line names this install's server.js by full path, which is
+      how the launcher and the "start it by hand" hint both run it, or
+    - its parent is the cmd.exe running our launcher. Launchers written by
+      older versions of this script ran a bare "server.js" from inside the app
+      directory, which no path match can see, and that server still has to be
+      stopped before the update that rewrites the launcher.
+  Windows paths are case-insensitive, so the match is too.
+
   CIM is the Windows way to read another process's command line; Get-Process
   grew a CommandLine property in PowerShell 7 and covers everywhere else.
 #>
+function Test-CommandLine {
+  param([string]$CommandLine, [string]$Path)
+  if (-not $CommandLine -or -not $Path) { return $false }
+  return $CommandLine.IndexOf($Path, [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function Select-AppProcess {
+  param([object[]]$Processes, [string]$Server, [string]$Launcher)
+  $launcherIds = @($Processes |
+    Where-Object { $_.Name -eq 'cmd.exe' -and (Test-CommandLine $_.CommandLine $Launcher) } |
+    ForEach-Object { $_.ProcessId })
+  return @($Processes |
+    Where-Object { $_.Name -eq 'node.exe' -and
+      ((Test-CommandLine $_.CommandLine $Server) -or ($launcherIds -contains $_.ParentProcessId)) } |
+    ForEach-Object { $_.ProcessId })
+}
+
 function Get-AppProcess {
-  $target = (Join-Path $AppDir 'server.js')
+  $server = Join-Path (Get-FullPath $AppDir) 'server.js'
   if (Have 'Get-CimInstance') {
-    return @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -and $_.CommandLine.Contains($target) } |
-      ForEach-Object { $_.ProcessId })
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe' OR Name = 'cmd.exe'" -ErrorAction SilentlyContinue)
+    return Select-AppProcess -Processes $procs -Server $server -Launcher $CmdShim
   }
   return @(Get-Process -Name 'node' -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($target) } |
+    Where-Object { Test-CommandLine $_.CommandLine $server } |
     ForEach-Object { $_.Id })
 }
 
+# The wscript.exe running our .vbs - the task's own process, which restarts
+# node when it exits with an error.
+function Get-LauncherHost {
+  if (-not (Have 'Get-CimInstance')) { return @() }
+  return @(Get-CimInstance Win32_Process -Filter "Name = 'wscript.exe' OR Name = 'cscript.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { Test-CommandLine $_.CommandLine $VbsShim } |
+    ForEach-Object { $_.ProcessId })
+}
+
+# The launcher goes first, so it is not there to see node die and start it
+# again. Ending the task should already have ended it; this makes sure.
 function Stop-App {
   if (Get-Task) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+  foreach ($processId in Get-LauncherHost) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+  }
   foreach ($processId in Get-AppProcess) {
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
   }
@@ -465,8 +647,32 @@ function Show-Where {
       if ($ip) { Say "    On your phone: http://${ip}:$Port" }
     }
   } else {
-    Warn "Not running. See: .\install.cmd logs"
+    Warn "Not running. See: $(Get-LauncherHint) logs"
   }
+}
+
+# A PowerShell single-quoted string; only ' itself needs escaping, by doubling.
+function ConvertTo-PSLiteral {
+  param([string]$Text)
+  return "'" + $Text.Replace("'", "''") + "'"
+}
+
+# How to run this installer again later. The copy inside the app directory is
+# the one to name: after the irm one-liner there is no install.cmd in the
+# current directory at all, and every update keeps that copy current.
+function Get-LauncherHint {
+  $installed = Join-Path (Join-Path (Get-FullPath $AppDir) 'scripts') 'install.cmd'
+  if (-not (Test-Path $installed)) { return '.\install.cmd' }
+  return "& $(ConvertTo-PSLiteral $installed)"
+}
+
+# The command that runs the server in this console with the settings the task
+# would use - all three of them, or -Listen 127.0.0.1 would quietly become
+# 0.0.0.0 and put it on the network.
+function Get-StartHint {
+  $vars = "`$env:BT_DATA_DIR=$(ConvertTo-PSLiteral (Get-FullPath $DataDir)); " +
+          "`$env:BT_PORT=$Port; `$env:BT_HOST=$(ConvertTo-PSLiteral $Listen)"
+  return "$vars; node $(ConvertTo-PSLiteral (Join-Path (Get-FullPath $AppDir) 'server.js'))"
 }
 
 # ------------------------------------------------------------------ actions --
@@ -474,7 +680,8 @@ function Show-Where {
 function Invoke-Install {
   Step "Installing $AppName"
   Get-NodePath | Out-Null
-  Get-Source -Dest $AppDir
+  $fetched = Get-Source -Dest $AppDir
+  Set-Source -Fetched $fetched -Dest $AppDir
   Assert-App
   if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir -Force | Out-Null }
   Ok "Data directory: $DataDir"
@@ -482,37 +689,64 @@ function Invoke-Install {
   if ($NoService) {
     Say ''
     Ok 'Installed. Start it with:'
-    Say "    `$env:BT_DATA_DIR='$DataDir'; `$env:BT_PORT=$Port; node '$(Join-Path $AppDir 'server.js')'"
+    Say "    $(Get-StartHint)"
   } else {
     Add-Service
   }
   Say ''
   Say "  app  $AppDir"
   Say "  data $DataDir"
-  Say "  update later with: .\install.cmd update"
+  Say "  update later with: $(Get-LauncherHint) update"
 }
 
 function Invoke-Update {
   Step "Updating $AppName"
-  Get-NodePath | Out-Null
+  $node = Get-NodePath
   Assert-App
   $before = Get-Revision
-  Backup-Data
 
-  $wasRunning = [bool](Get-AppProcess)
-  if ($wasRunning) { Stop-App; Start-Sleep -Seconds 1 }
+  # Everything that needs the network comes first, while the running copy
+  # carries on serving: no connection or a mistyped -Branch then costs nothing.
+  $fetched = Get-Source -Dest $AppDir
 
-  Get-Source -Dest $AppDir
-  Assert-App
-  $after = Get-Revision
-
-  if ($wasRunning) {
-    # The shim pins the node path and the data directory, so rewrite it in case
-    # either moved between releases.
-    Write-Shim -NodePath (Get-Command node).Source
-    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+  $task = Get-Task
+  $wasRunning = [bool](Get-AppProcess) -or ($task -and $task.State -eq 'Running')
+  $stopped = $false
+  $done = $false
+  # From here on the tracker is down, so whatever happens - a failed checkout,
+  # a full disk, Ctrl+C - the finally block starts it again; at worst on the
+  # version it was running before.
+  try {
+    if ($wasRunning) {
+      Step 'Stopping the running copy'
+      Stop-App
+      $stopped = $true
+      Start-Sleep -Seconds 1
+    }
+    # Taken only once it is stopped, so no file is half-written as it is copied.
+    Backup-Data
+    Set-Source -Fetched $fetched -Dest $AppDir
+    Assert-App
+    # The launcher pins the node path and the directories: rewrite it in case
+    # node moved, and so that a -Port or -Data given to this update applies.
+    if ($task) { Write-Shim -NodePath $node }
+    $done = $true
+  } finally {
+    if ($fetched.Stage -and (Test-Path $fetched.Stage)) {
+      Remove-Item $fetched.Stage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($stopped) {
+      if (-not $done) { Warn 'The update did not finish; starting the copy that was running again.' }
+      if ($task) {
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+      } else {
+        Warn 'It was not started by the logon task, so start it again yourself:'
+        Say "    $(Get-StartHint)"
+      }
+    }
   }
+  $after = Get-Revision
 
   if ($before -eq $after) {
     Ok "Already at the latest revision ($after)"
@@ -536,10 +770,21 @@ function Invoke-Uninstall {
     Die "$DataDir has no config.json or events.log, so it does not look like the`n  tracker's data directory. Not deleting it."
   }
   Remove-Service
-  if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force; Ok "Removed $AppDir" }
+  if (Test-Path $AppDir) {
+    Remove-Item $AppDir -Recurse -Force -ErrorAction SilentlyContinue
+    # Checked rather than assumed: a file held open by another program - an
+    # editor, an Explorer window, a node that would not die - keeps part of it.
+    if (Test-Path $AppDir) {
+      Die "Could not remove all of $AppDir; something is still using it.`n  The task is already gone, so close whatever has it open and delete the rest by hand."
+    }
+    Ok "Removed $AppDir"
+  }
   if ($Purge) {
     Backup-Data
     Remove-Item $DataDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $DataDir) {
+      Die "Could not remove all of $DataDir; something is still using it.`n  What is left is still there, and a snapshot is in $BackupDir."
+    }
     Warn "Removed $DataDir - the snapshot in $BackupDir is all that is left."
   } else {
     Ok "Kept your entries in $DataDir (pass -Purge to delete them too)"
@@ -550,6 +795,7 @@ function Invoke-Status {
   Say $AppName
   Say "  app     $AppDir  ($(Get-Revision))"
   Say "  data    $DataDir"
+  Say "  listen  ${Listen}:$Port"
   Say "  version $(if (Get-InstalledVersion) { Get-InstalledVersion } else { 'not installed' })"
   $task = Get-Task
   Say "  task    $(if ($task) { "$TaskName ($($task.State))" } else { 'not registered' })"
