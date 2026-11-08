@@ -224,7 +224,10 @@ fetch_source() {
   if [ -d "$dest/.git" ] && git_works; then
     step "Updating the existing checkout"
     git -C "$dest" remote set-url origin "$REPO_URL"
-    git -C "$dest" fetch --depth 1 origin "$BRANCH"
+    # Spelled out in full because the clone is single-branch: its configured
+    # refspec only covers the branch it was cloned on, so a plain fetch of
+    # another branch would never create origin/<that branch>.
+    git -C "$dest" fetch -q --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
     git -C "$dest" checkout -q -B "$BRANCH" "origin/$BRANCH"
     git -C "$dest" reset --hard -q "origin/$BRANCH"
     ok "At $(git -C "$dest" rev-parse --short HEAD) on $BRANCH"
