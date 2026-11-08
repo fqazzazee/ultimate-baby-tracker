@@ -150,12 +150,24 @@ function buildState(url) {
   const babyId = url.searchParams.get('babyId') || 'all';
   const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 7));
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  // The cap scales with the window. A flat 1000 was hit at about 33 entries a
+  // day over History's 30 - an ordinary day for twins, or a newborn with
+  // pumping - and the oldest days just disappeared from the list. 200 a day is
+  // one every seven minutes around the clock; past that the cap still guards
+  // the payload, and `eventsTruncated` says so rather than leaving it silent.
+  const cap = Math.max(1000, days * 200);
+  const events = store.listEvents({ babyId, since, limit: cap + 1 });
+  const eventsTruncated = events.length > cap;
+  if (eventsTruncated) events.length = cap;
   return {
     rev: store.getRevision(),
     app: APP,
     serverTime: new Date().toISOString(),
     config,
-    events: store.listEvents({ babyId, since, limit: 1000 }),
+    events,
+    // True when `events` stops short of `days` because of the cap above: the
+    // list is the newest entries in the window, not all of them.
+    eventsTruncated,
     timers: store.listTimers(),
     alarms: computeAlarmInstances(config),
     totalEvents: store.eventCount(),
