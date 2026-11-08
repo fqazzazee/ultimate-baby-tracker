@@ -40,7 +40,7 @@ it from.
 | | Install | In the background |
 | --- | --- | --- |
 | **Linux** | `./scripts/install.sh install` | systemd **user** service — no root, survives a logout, starts at boot |
-| **macOS** | `./scripts/install.sh install` | no service; the install works and then prints the command to start it yourself |
+| **macOS** | `./scripts/install.sh install` | a LaunchAgent under your own account — no root, starts when you log in |
 | **Windows** | `.\scripts\install.cmd install` | scheduled task under your own account — starts when you log in, no administrator rights |
 | **Anything else with Node 18+** | `node server.js` | by hand, or write your own unit — see [SECURITY.md](SECURITY.md#putting-it-behind-a-proxy) |
 | **iOS · Android** | — | not supported — a phone is a client here, never the host |
@@ -79,10 +79,11 @@ Node 18 or newer is the only prerequisite, plus git if you clone the repository.
 | **macOS** | the **macOS Installer (.pkg)** from [nodejs.org](https://nodejs.org/en/download) — or `brew install node` if you already use [Homebrew](https://brew.sh) | `xcode-select --install` |
 | **Windows** | `winget install OpenJS.NodeJS.LTS` | `winget install Git.Git` |
 
-**On a Mac, neither Homebrew nor git is there out of the box.** The `git` that
-macOS ships is a placeholder that only offers to install Apple's Command Line
-Tools, so run `xcode-select --install` once and let it finish before either of
-the commands below. Check with `node --version` and `git --version`.
+**On a Mac, neither Homebrew nor git is there out of the box.** Install Node
+from nodejs.org, then either use the one-line install below, which needs no git,
+or run `xcode-select --install` once and let it finish before cloning — the
+`git` macOS ships is a placeholder that only offers to install Apple's Command
+Line Tools. Check with `node --version` and `git --version`.
 
 ### Linux and macOS
 
@@ -101,8 +102,9 @@ curl -fsSL https://raw.githubusercontent.com/fqazzazee/ultimate-baby-tracker/mai
 On Linux that sets it up as a background service that starts with your machine.
 **No `sudo`, no root** — it is a systemd *user* service.
 
-On macOS there is no service yet: the install finishes by printing the command
-that starts the server. It runs for as long as that terminal window stays open.
+On macOS it is a LaunchAgent instead, which also needs no root and starts when
+you log in. Keep it out of Documents, Desktop and Downloads, which macOS will
+not let a background service read.
 
 ### Windows
 

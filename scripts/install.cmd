@@ -25,10 +25,17 @@ if not exist "%PS1%" (
 
 rem PowerShell 7 if it is here, Windows PowerShell 5.1 otherwise - the script
 rem only uses cmdlets that both have.
-where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (
-  pwsh -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
-) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
+set "PS=powershell"
+where pwsh >nul 2>&1 && set "PS=pwsh"
+
+rem The call and the exit are one bracketed block, which cmd.exe reads in full
+rem before running any of it. It reads the rest of a batch file a line at a
+rem time, from where it left off, and the copy of this file in the app
+rem directory is the one people run later: update may rewrite it and uninstall
+rem deletes it while it runs. Anything after the call would then come from the
+rem new file at the old offset, or fail with "The batch file cannot be found".
+rem exit /b with no number passes PowerShell's exit code on unchanged.
+(
+  %PS% -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
+  exit /b
 )
-exit /b %ERRORLEVEL%

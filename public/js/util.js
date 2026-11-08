@@ -39,7 +39,11 @@ export function fmtTime(iso) {
 export function fmtDate(iso) {
   const d = new Date(iso);
   const today = new Date();
-  const yest = new Date(Date.now() - 86400000);
+  // Yesterday by the calendar, not "24 hours ago". The day a clock springs
+  // forward is 23 hours long, so for the first hour after the change "24 hours
+  // ago" lands two dates back and every heading in History is off by one.
+  const yest = new Date(today);
+  yest.setDate(yest.getDate() - 1);
   const same = (a, b) => a.toDateString() === b.toDateString();
   if (same(d, today)) return 'Today';
   if (same(d, yest)) return 'Yesterday';

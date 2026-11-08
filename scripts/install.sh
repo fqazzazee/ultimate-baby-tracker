@@ -14,7 +14,8 @@
 #
 # On Linux this installs a *user* systemd unit, which needs no root at all.
 # Pass --system to install a machine-wide unit instead (that one does need
-# root, and runs under its own unprivileged account).
+# root, and runs under its own unprivileged account). On macOS it installs a
+# per-user LaunchAgent, which needs no root either.
 #
 # Your entries live outside the application directory, so an update can never
 # touch them, and every update snapshots them first anyway.
@@ -44,6 +45,10 @@ APP_DIR="$data_home/$SERVICE_NAME/app"
 DATA_DIR="$data_home/$SERVICE_NAME/data"
 BACKUP_DIR="$data_home/$SERVICE_NAME/backups"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+# macOS: launchd has no journal for a LaunchAgent, so its output goes to a file.
+LABEL="com.github.fqazzazee.$SERVICE_NAME"
+AGENT_DIR="$HOME/Library/LaunchAgents"
+LOG_FILE="$data_home/$SERVICE_NAME/server.log"
 
 # ------------------------------------------------------------------ output --
 
@@ -53,12 +58,6 @@ else
   B=''; DIM=''; RED=''; GRN=''; YEL=''; R=''
 fi
 
-# Piped from curl, $0 is "bash", so the hints have to name something runnable.
-case "${0##*/}" in
-  bash|sh|-bash|-sh|"") SELF="./scripts/install.sh" ;;
-  *) SELF="$0" ;;
-esac
-
 say()  { printf '%s\n' "$*"; }
 step() { printf '%s==>%s %s\n' "$B" "$R" "$*"; }
 ok()   { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
@@ -66,10 +65,27 @@ warn() { printf '  %s!%s %s\n' "$YEL" "$R" "$*" >&2; }
 die()  { printf '%serror:%s %s\n' "$RED" "$R" "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# A value as you would type it into a shell: as is when that is safe, otherwise
+# in single quotes. For the commands this script prints for you to copy.
+sh_word() {
+  case "$1" in
+    ""|*[!A-Za-z0-9_./:@%+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The command that runs the server in the foreground, for when there is no
+# service to do it.
+run_by_hand() {
+  say "    BT_DATA_DIR=$(sh_word "$DATA_DIR") BT_PORT=$(sh_word "$PORT") BT_HOST=$(sh_word "$HOST") node $(sh_word "$APP_DIR/server.js")"
+}
+
 # ------------------------------------------------------------------- checks --
 
 check_node() {
   have node || die "Node.js is not installed. Node $MIN_NODE_MAJOR or newer is required.
+  macOS:         the macOS Installer (.pkg) from https://nodejs.org/en/download
+                 (or brew install node, if you already use Homebrew)
   Fedora:        sudo dnf install nodejs
   Debian/Ubuntu: sudo apt install nodejs
   Anywhere:      https://nodejs.org  (or nvm, which needs no root)"
@@ -80,18 +96,38 @@ check_node() {
   ok "Node $(node --version)"
 }
 
-# systemd is how a service is run on Fedora and every other mainstream distro.
-# Without it the app still runs, so say so plainly rather than refusing.
-has_systemd() {
-  [ "$(uname -s)" = "Linux" ] && have systemctl && [ -d /run/systemd/system ]
+# What runs services here: systemd on Fedora and every other mainstream
+# distro, launchd on macOS, or nothing (a container, WSL1, a distro that went
+# its own way). Without one the app still runs, so the script says so plainly
+# rather than refusing. Worked out once, into $SVC, before any action runs.
+service_manager() {
+  case "$(uname -s)" in
+    Linux)  if have systemctl && [ -d /run/systemd/system ]; then echo systemd; return; fi ;;
+    Darwin) if have launchctl; then echo launchd; return; fi ;;
+  esac
+  echo none
 }
 
-systemctl_user() { systemctl --user "$@"; }
 sc() { if [ "$MODE" = "system" ]; then sudo systemctl "$@"; else systemctl --user "$@"; fi; }
 
+# The file that defines the service: a systemd unit or a launchd property list.
 unit_path() {
-  if [ "$MODE" = "system" ]; then echo "/etc/systemd/system/$SERVICE_NAME.service"
+  if [ "$SVC" = "launchd" ]; then echo "$AGENT_DIR/$LABEL.plist"
+  elif [ "$MODE" = "system" ]; then echo "/etc/systemd/system/$SERVICE_NAME.service"
   else echo "$UNIT_DIR/$SERVICE_NAME.service"; fi
+}
+
+# On a Mac without Apple's Command Line Tools, /usr/bin/git is a placeholder: it
+# offers to install them and fails. So "is git on the PATH" is the wrong
+# question; "does git run" is the right one. Where that placeholder is the only
+# git it is not even run, because running it pops up the install dialog.
+git_works() {
+  have git || return 1
+  if [ "$(uname -s)" = "Darwin" ] && [ "$(command -v git)" = "/usr/bin/git" ] \
+     && have xcode-select && ! xcode-select -p >/dev/null 2>&1; then
+    return 1
+  fi
+  git --version >/dev/null 2>&1
 }
 
 # ------------------------------------------------------------- path safety --
@@ -199,37 +235,47 @@ check_replaceable() {
 
 # -------------------------------------------------------------- fetch code --
 
+# Getting the code and putting it in place are two steps, so that an update
+# can do all the downloading while the tracker is still running and only stop
+# it for the switch. fetch_source leaves the new revision waiting - in the
+# checkout's object store, or unpacked into $STAGE beside the destination - and
+# changes nothing you would notice; switch_source then puts it in place.
+STAGE=""
+
 # Prefer a git clone: updating is then a fetch, and you can see what changed.
-# Fall back to the branch tarball where git is not installed.
+# Fall back to the branch tarball where git is not available.
 fetch_source() {
   local dest="$1"
   check_replaceable "$dest"
-  if [ -d "$dest/.git" ]; then
-    step "Updating the existing checkout"
+  STAGE=""
+  # A checkout is only updated in place while git works; if it has stopped
+  # working (the Command Line Tools were removed, say) the copy is replaced.
+  if [ -d "$dest/.git" ] && git_works; then
+    step "Fetching $BRANCH"
     git -C "$dest" remote set-url origin "$REPO_URL"
-    git -C "$dest" fetch --depth 1 origin "$BRANCH"
-    git -C "$dest" checkout -q -B "$BRANCH" "origin/$BRANCH"
-    git -C "$dest" reset --hard -q "origin/$BRANCH"
-    ok "At $(git -C "$dest" rev-parse --short HEAD) on $BRANCH"
+    # Spelled out in full because the clone is single-branch: its configured
+    # refspec only covers the branch it was cloned on, so a plain fetch of
+    # another branch would never create origin/<that branch>.
+    git -C "$dest" fetch -q --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
+      || die "Could not fetch $BRANCH from $REPO_URL; git's message is above. Nothing was changed."
     return
   fi
 
   mkdir -p "$(dirname "$dest")"
   # Fetched beside the destination, then swapped in, so it is a rename on the
   # same filesystem and the old copy is only removed once the new one is whole.
-  local stage
-  stage="$(dirname "$dest")/.$(basename "$dest").new.$$"
-  rm -rf "$stage"
-  if have git; then
+  # If anything fails before then, the EXIT trap removes the half-made copy.
+  STAGE="$(dirname "$dest")/.$(basename "$dest").new.$$"
+  rm -rf "$STAGE"
+  if git_works; then
     step "Cloning $REPO_URL ($BRANCH)"
-    git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$stage" >/dev/null 2>&1 \
-      || { rm -rf "$stage"; die "Could not clone $REPO_URL. Check the network, or the branch name."; }
-    replace_dir "$stage" "$dest"
-    ok "At $(git -C "$dest" rev-parse --short HEAD)"
+    # git's own message says what went wrong, so it is left on the screen.
+    git clone -q --depth 1 --branch "$BRANCH" "$REPO_URL" "$STAGE" \
+      || die "Could not clone $REPO_URL ($BRANCH); git's message is above."
   else
     have curl || have wget || die "Need git, curl or wget to download the app."
     have tar || die "Need tar to unpack the download."
-    step "Downloading $BRANCH (git is not installed, so this is a tarball)"
+    step "Downloading $BRANCH (git is not available, so this is a tarball)"
     local tmp src
     tmp="$(mktemp -d)"
     local url="$REPO_URL/archive/refs/heads/$BRANCH.tar.gz"
@@ -246,12 +292,38 @@ fetch_source() {
       rm -rf "$tmp"
       die "The download from $url does not contain the app."
     fi
-    mkdir -p "$stage"
-    cp -a "$src"/. "$stage"/
+    mkdir -p "$STAGE"
+    cp -a "$src"/. "$STAGE"/
     rm -rf "$tmp"
-    replace_dir "$stage" "$dest"
+  fi
+}
+
+switch_source() {
+  local dest="$1"
+  if [ -z "$STAGE" ]; then
+    # Forced, so that a stray local edit is overwritten instead of aborting the
+    # update halfway: the application directory is not for your own changes.
+    git -C "$dest" checkout -q -f -B "$BRANCH" "origin/$BRANCH"
+    ok "At $(git -C "$dest" rev-parse --short HEAD) on $BRANCH"
+    return
+  fi
+  replace_dir "$STAGE" "$dest"
+  STAGE=""
+  if [ -d "$dest/.git" ]; then
+    ok "At $(git -C "$dest" rev-parse --short HEAD)"
+  else
     ok "Unpacked to $dest"
     warn "Without git, 'update' re-downloads the whole tarball each time."
+  fi
+}
+
+# The checked-out revision, or "unknown" for a tarball install. Only a working
+# git is asked, for the same reason as in git_works.
+revision() {
+  if [ -d "$APP_DIR/.git" ] && git_works; then
+    git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown
+  else
+    echo unknown
   fi
 }
 
@@ -275,6 +347,20 @@ check_paths() {
     /tmp/*|/var/tmp/*|/dev/shm/*)
       warn "Data directory is under /tmp — your entries will not survive a reboot." ;;
   esac
+  # macOS keeps background jobs out of these folders unless they are granted
+  # Full Disk Access, so a LaunchAgent pointed at one fails with "Operation not
+  # permitted" while the same command run in Terminal works.
+  if [ "$SVC" = "launchd" ]; then
+    local d
+    for d in "$APP_DIR" "$DATA_DIR"; do
+      case "$d/" in
+        "$HOME/Documents/"*|"$HOME/Desktop/"*|"$HOME/Downloads/"*|"$HOME/Library/Mobile Documents/"*)
+          warn "$d is in a folder macOS keeps background services out of
+    (Documents, Desktop, Downloads, iCloud Drive). The service will be refused
+    access unless node is given Full Disk Access; the default location avoids this." ;;
+      esac
+    done
+  fi
 }
 
 # ------------------------------------------------------------------ backups --
@@ -297,6 +383,30 @@ snapshot_data() {
 
 # ------------------------------------------------------------------ service --
 
+# systemd reads a unit line its own way: % starts a specifier everywhere, $
+# expands a variable in ExecStart's arguments (though not in the program path),
+# and whitespace splits ExecStart, Environment and ReadWritePaths into words
+# unless they are double-quoted. These write a value so that systemd reads back
+# exactly what was given - a data directory called "Baby Tracker" included.
+sd_quote() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g')"
+}
+sd_exec_arg() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g' -e 's/\$/$$/g')"
+}
+# WorkingDirectory= takes the rest of the line as one path, quotes and all.
+sd_path() { printf '%s' "$1" | sed 's/%/%%/g'; }
+
+# And the reverse, for reading our own unit back. Units written before values
+# were quoted have Environment=BT_PORT=8477, so that form is read too.
+unit_env() {
+  sed -n -e "s/^Environment=\"$2=\\(.*\\)\"\$/\\1/p" -e "s/^Environment=$2=//p" "$1" | tail -1 \
+    | sed -e 's/\\\(.\)/\1/g' -e 's/%%/%/g'
+}
+unit_workdir() {
+  sed -n 's/^WorkingDirectory=//p' "$1" | tail -1 | sed 's/%%/%/g'
+}
+
 write_user_unit() {
   mkdir -p "$UNIT_DIR"
   cat > "$(unit_path)" <<UNIT
@@ -308,11 +418,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$APP_DIR
-ExecStart=$(command -v node) $APP_DIR/server.js
-Environment=BT_PORT=$PORT
-Environment=BT_HOST=$HOST
-Environment=BT_DATA_DIR=$DATA_DIR
+WorkingDirectory=$(sd_path "$APP_DIR")
+ExecStart=$(sd_quote "$(command -v node)") $(sd_exec_arg "$APP_DIR/server.js")
+Environment=$(sd_quote "BT_PORT=$PORT")
+Environment=$(sd_quote "BT_HOST=$HOST")
+Environment=$(sd_quote "BT_DATA_DIR=$DATA_DIR")
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
@@ -346,11 +456,11 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-WorkingDirectory=$APP_DIR
-ExecStart=$(command -v node) $APP_DIR/server.js
-Environment=BT_PORT=$PORT
-Environment=BT_HOST=$HOST
-Environment=BT_DATA_DIR=$DATA_DIR
+WorkingDirectory=$(sd_path "$APP_DIR")
+ExecStart=$(sd_quote "$(command -v node)") $(sd_exec_arg "$APP_DIR/server.js")
+Environment=$(sd_quote "BT_PORT=$PORT")
+Environment=$(sd_quote "BT_HOST=$HOST")
+Environment=$(sd_quote "BT_DATA_DIR=$DATA_DIR")
 Restart=on-failure
 RestartSec=3
 # Nothing here needs privileges or anything outside its own data directory.
@@ -358,7 +468,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=$DATA_DIR
+ReadWritePaths=$(sd_quote "$DATA_DIR")
 
 [Install]
 WantedBy=multi-user.target
@@ -366,58 +476,253 @@ UNIT
   ok "Unit written to $(unit_path)"
 }
 
+# ----------------------------------------------------------------- launchd --
+
+# On macOS the service is a per-user LaunchAgent: a property list in
+# ~/Library/LaunchAgents that launchd loads at every login (RunAtLoad) and
+# restarts whenever it stops (KeepAlive). Like the systemd user unit, it needs
+# no root. It is loaded into, and unloaded from, the logged-in user's session.
+
+xml_escape()   { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+xml_unescape() { sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'; }
+
+# One <key>…</key><string>…</string> pair out of the property list, whether it
+# is laid out the way write_launch_agent writes it or has been re-saved by
+# plutil or Xcode with each part on a line of its own.
+plist_value() {
+  tr -d '\n' < "$1" \
+    | sed -n "s|.*<key>$2</key>[[:space:]]*<string>\\([^<]*\\)</string>.*|\\1|p" | xml_unescape
+}
+
+write_launch_agent() {
+  mkdir -p "$AGENT_DIR" "$(dirname "$LOG_FILE")"
+  cat > "$(unit_path)" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(xml_escape "$(command -v node)")</string>
+    <string>$(xml_escape "$APP_DIR/server.js")</string>
+  </array>
+  <key>WorkingDirectory</key><string>$(xml_escape "$APP_DIR")</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>BT_PORT</key><string>$(xml_escape "$PORT")</string>
+    <key>BT_HOST</key><string>$(xml_escape "$HOST")</string>
+    <key>BT_DATA_DIR</key><string>$(xml_escape "$DATA_DIR")</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$(xml_escape "$LOG_FILE")</string>
+  <key>StandardErrorPath</key><string>$(xml_escape "$LOG_FILE")</string>
+</dict>
+</plist>
+PLIST
+  ok "LaunchAgent written to $(unit_path)"
+}
+
+la_domain() { echo "gui/$(id -u)"; }
+la_target() { echo "$(la_domain)/$LABEL"; }
+la_loaded() { launchctl print "$(la_target)" >/dev/null 2>&1; }
+
+# Captured rather than piped into grep -q, which can exit before launchctl has
+# finished writing and so fail the pipeline under pipefail.
+la_running() {
+  local out
+  out="$(launchctl print "$(la_target)" 2>/dev/null)" || return 1
+  case "$out" in *"state = running"*) return 0 ;; esac
+  return 1
+}
+
+la_load() {
+  # Undo any earlier `launchctl disable`, which would make the load a no-op.
+  launchctl enable "$(la_target)" >/dev/null 2>&1 || true
+  launchctl bootstrap "$(la_domain)" "$(unit_path)"
+}
+
+la_unload() {
+  la_loaded || return 0
+  launchctl bootout "$(la_target)" >/dev/null 2>&1 || true
+  # bootout can return before the job is fully gone, and loading it again in
+  # that moment fails with "Input/output error". Give it a few seconds.
+  local i=0
+  while la_loaded && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
+}
+
+# ------------------------------------------------- either service manager --
+
+# The service definition records the node path and the directories, so it is
+# rewritten on every add and update.
+service_write() {
+  case "$SVC" in
+    systemd)
+      if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
+      sc daemon-reload ;;
+    launchd) write_launch_agent ;;
+  esac
+}
+
+# "On" means the service manager is keeping it up. For launchd that is being
+# loaded, even in the seconds between a crash and the restart.
+service_running() {
+  case "$SVC" in
+    systemd) sc is-active --quiet "$SERVICE_NAME" 2>/dev/null ;;
+    launchd) la_loaded ;;
+    *) return 1 ;;
+  esac
+}
+
+service_start() {
+  case "$SVC" in
+    systemd) sc start "$SERVICE_NAME" ;;
+    launchd) if la_loaded; then launchctl kickstart "$(la_target)"; else la_load; fi ;;
+  esac
+}
+
+# Stopped until the next start - or, for the LaunchAgent, the next login.
+service_stop() {
+  case "$SVC" in
+    systemd) sc stop "$SERVICE_NAME" ;;
+    launchd) la_unload ;;
+  esac
+}
+
+service_restart() {
+  case "$SVC" in
+    systemd) sc restart "$SERVICE_NAME" ;;
+    launchd) if la_loaded; then launchctl kickstart -k "$(la_target)"; else la_load; fi ;;
+  esac
+}
+
+service_logs() {
+  local lines="$1"; shift
+  case "$SVC" in
+    systemd)
+      if [ "$MODE" = "system" ]; then sudo journalctl -u "$SERVICE_NAME" -n "$lines" "$@"
+      else journalctl --user -u "$SERVICE_NAME" -n "$lines" "$@"; fi ;;
+    launchd)
+      if [ -f "$LOG_FILE" ]; then tail -n "$lines" "$@" "$LOG_FILE"
+      else say "  (no log yet at $LOG_FILE)"; fi ;;
+  esac
+}
+
+# start, stop, restart and logs need a service to act on. Where there is none,
+# say why and what to do instead, rather than failing on a missing command.
+require_service() {
+  if [ "$SVC" = "none" ]; then
+    warn "This machine has no service manager (neither systemd nor launchd), so"
+    say  "  there is no service, and '$ACTION' does not apply. Run the tracker by hand:"
+    run_by_hand
+    exit 1
+  fi
+  [ -f "$(unit_path)" ] || die "No service is installed yet. Create it with: $SELF service add"
+}
+
 service_add() {
-  has_systemd || {
-    warn "No systemd here, so there is no service to add."
+  if [ "$SVC" = "none" ]; then
+    warn "No systemd or launchd here, so there is no service to add."
     say  "  Run it by hand instead:"
-    say  "    BT_DATA_DIR='$DATA_DIR' BT_PORT=$PORT node '$APP_DIR/server.js'"
+    run_by_hand
     return 0
-  }
+  fi
+  if [ "$SVC" = "launchd" ]; then
+    launch_agent_add
+  else
+    systemd_add
+  fi
+  sleep 2
+  service_status_short
+}
+
+launch_agent_add() {
+  step "Installing the LaunchAgent"
+  write_launch_agent
+  la_unload
+  if la_load; then
+    ok "Loaded; it starts again at every login"
+  else
+    # Typically over SSH with nobody logged in at the Mac: there is no GUI
+    # session to load it into. The file is in place, so the next login will.
+    warn "launchd would not load it now (usual over SSH with nobody logged in at"
+    say  "  the Mac). It is installed and starts at your next login, or run:"
+    say  "    ${B}$SELF start${R}"
+  fi
+  say  "  ${DIM}It runs while you are logged in. If this Mac restarts on its own, turn"
+  say  "  on automatic login in System Settings > Users & Groups so it comes back.${R}"
+}
+
+systemd_add() {
   step "Installing the $([ "$MODE" = system ] && echo system || echo user) service"
-  if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
-  sc daemon-reload
+  service_write
   sc enable "$SERVICE_NAME" >/dev/null 2>&1 || true
   sc restart "$SERVICE_NAME"
 
   # A user service stops at logout unless lingering is on. Ask for it; if the
   # policy says no, say so rather than leaving a service that quietly dies.
   if [ "$MODE" = "user" ]; then
-    if loginctl show-user "$USER" -p Linger --value 2>/dev/null | grep -q yes; then
+    # $USER is not set in every environment (cron, env -i, some containers).
+    local me; me="${USER:-$(id -un)}"
+    if loginctl show-user "$me" -p Linger --value 2>/dev/null | grep -q yes; then
       ok "Lingering already enabled — it will run without you logged in"
-    elif loginctl enable-linger "$USER" >/dev/null 2>&1; then
+    elif loginctl enable-linger "$me" >/dev/null 2>&1; then
       ok "Lingering enabled — it will run without you logged in"
     else
       warn "Could not enable lingering. The service will stop when you log out."
-      say  "  To fix: ${B}sudo loginctl enable-linger $USER${R}"
+      say  "  To fix: ${B}sudo loginctl enable-linger $me${R}"
     fi
   fi
-  sleep 2
-  service_status_short
 }
 
 service_remove() {
-  has_systemd || { warn "No systemd here; nothing to remove."; return 0; }
-  step "Removing the service"
-  sc disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
-  if [ "$MODE" = "system" ]; then sudo rm -f "$(unit_path)"; else rm -f "$(unit_path)"; fi
-  sc daemon-reload
+  case "$SVC" in
+    none) warn "No systemd or launchd here; there is no service to remove."; return 0 ;;
+    launchd)
+      step "Removing the LaunchAgent"
+      la_unload
+      rm -f "$(unit_path)" ;;
+    systemd)
+      step "Removing the service"
+      sc disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+      if [ "$MODE" = "system" ]; then sudo rm -f "$(unit_path)"; else rm -f "$(unit_path)"; fi
+      sc daemon-reload ;;
+  esac
   ok "Service removed. The app and your data are untouched."
 }
 
+# Whether the server process is actually up right now (rather than merely
+# being kept up, which is what service_running asks).
+service_up() {
+  case "$SVC" in
+    systemd) sc is-active --quiet "$SERVICE_NAME" 2>/dev/null ;;
+    launchd) la_running ;;
+    *) return 1 ;;
+  esac
+}
+
+# The address a phone on the same network would use. macOS has no hostname -I.
+lan_ip() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true
+  else
+    hostname -I 2>/dev/null | awk '{print $1}' || true
+  fi
+}
+
 service_status_short() {
-  if has_systemd && sc is-active --quiet "$SERVICE_NAME"; then
+  if service_up; then
     ok "Running at ${B}http://localhost:$PORT${R}"
     if [ "$HOST" = "0.0.0.0" ]; then
-      local ip
-      ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || ip=""
-      [ -n "$ip" ] && say "    On your phone: ${B}http://$ip:$PORT${R}"
+      local ip; ip="$(lan_ip)"
+      if [ -n "$ip" ]; then say "    On your phone: ${B}http://$ip:$PORT${R}"; fi
     fi
   else
     warn "Not running."
-    if has_systemd; then
+    if [ "$SVC" != "none" ] && [ -f "$(unit_path)" ]; then
       say "  ${DIM}Last few lines of the log:${R}"
-      if [ "$MODE" = "system" ]; then sudo journalctl -u "$SERVICE_NAME" -n 6 --no-pager 2>/dev/null | sed 's/^/    /'
-      else journalctl --user -u "$SERVICE_NAME" -n 6 --no-pager 2>/dev/null | sed 's/^/    /'; fi
+      service_logs 6 2>/dev/null | sed 's/^/    /' || true
     fi
   fi
 }
@@ -429,13 +734,14 @@ do_install() {
   check_node
   check_paths
   fetch_source "$APP_DIR"
+  switch_source "$APP_DIR"
   verify_app
   mkdir -p "$DATA_DIR"
   ok "Data directory: $DATA_DIR"
   if [ "$NO_SERVICE" = "1" ]; then
     say ""
     ok "Installed. Start it with:"
-    say "    BT_DATA_DIR='$DATA_DIR' BT_PORT=$PORT node '$APP_DIR/server.js'"
+    run_by_hand
   else
     service_add
   fi
@@ -450,33 +756,43 @@ do_update() {
   check_node
   verify_app
   local before after
-  before="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  snapshot_data
+  before="$(revision)"
 
-  local was_running=0
-  if has_systemd && sc is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    was_running=1
-    sc stop "$SERVICE_NAME"
-  fi
-
+  # Everything that needs the network happens first, while the tracker is
+  # still up, so a bad connection or a mistyped branch changes nothing.
   fetch_source "$APP_DIR"
-  verify_app
-  after="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
+  # From here the service is off until the end, or until the EXIT trap starts
+  # it again if anything fails.
+  local was_running=0
+  if service_running; then
+    was_running=1
+    RESTART_ON_EXIT=1
+    step "Stopping the service"
+    service_stop
+  fi
+  # Taken with the service stopped, so it cannot catch a half-written file.
+  snapshot_data
+  switch_source "$APP_DIR"
+  verify_app
+  after="$(revision)"
+
+  # The unit pins the node path and the data directory, so rewrite it in case
+  # either moved between releases.
+  if [ -f "$(unit_path)" ]; then service_write; fi
   if [ "$was_running" = "1" ]; then
-    # The unit pins the node path and the data directory, so rewrite it in case
-    # either moved between releases.
-    if [ "$MODE" = "system" ]; then write_system_unit; else write_user_unit; fi
-    sc daemon-reload
-    sc start "$SERVICE_NAME"
+    service_start
+    RESTART_ON_EXIT=0
     sleep 1
   fi
 
-  if [ "$before" = "$after" ]; then
+  if [ "$after" = unknown ]; then
+    ok "Replaced with the latest download of $BRANCH"
+  elif [ "$before" = "$after" ]; then
     ok "Already at the latest revision ($after)"
   else
     ok "Updated $before → $after"
-    [ -d "$APP_DIR/.git" ] && git -C "$APP_DIR" --no-pager log --oneline "$before..$after" 2>/dev/null | head -10 || true
+    [ "$after" != unknown ] && git -C "$APP_DIR" --no-pager log --oneline "$before..$after" 2>/dev/null | head -10 || true
   fi
   [ "$was_running" = "1" ] && service_status_short
   return 0
@@ -500,6 +816,11 @@ do_uninstall() {
   else
     ok "Nothing at $APP_DIR to remove"
   fi
+  # The LaunchAgent's log is the app's, not yours, so it goes with the app.
+  if [ "$SVC" = "launchd" ] && [ -f "$LOG_FILE" ]; then
+    rm -f "$LOG_FILE"
+    ok "Removed $LOG_FILE"
+  fi
   if [ "$PURGE" = "1" ]; then
     snapshot_data
     rm -rf "$DATA_DIR"
@@ -511,15 +832,23 @@ do_uninstall() {
 
 do_status() {
   say "${B}$APP_NAME${R}"
-  say "  app     $APP_DIR $([ -d "$APP_DIR/.git" ] && echo "($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null))" || echo '')"
+  local rev; rev="$(revision)"
+  say "  app     $APP_DIR $([ "$rev" != unknown ] && echo "($rev)" || echo '')"
   say "  data    $DATA_DIR"
-  say "  version $(node -p "require('$APP_DIR/package.json').version" 2>/dev/null || echo 'not installed')"
-  say "  unit    $(unit_path)"
-  if has_systemd; then
-    say "  state   $(sc is-active "$SERVICE_NAME" 2>/dev/null || echo inactive) / $(sc is-enabled "$SERVICE_NAME" 2>/dev/null || echo disabled)"
-  else
-    say "  state   no systemd on this machine"
-  fi
+  say "  version $(node -p 'require(process.argv[1]).version' "$APP_DIR/package.json" 2>/dev/null || echo 'not installed')"
+  case "$SVC" in
+    systemd)
+      say "  unit    $(unit_path)"
+      say "  state   $(sc is-active "$SERVICE_NAME" 2>/dev/null || echo inactive) / $(sc is-enabled "$SERVICE_NAME" 2>/dev/null || echo disabled)" ;;
+    launchd)
+      say "  agent   $(unit_path)$([ -f "$(unit_path)" ] || echo ' (not installed)')"
+      say "  log     $LOG_FILE"
+      if la_running; then say "  state   running"
+      elif la_loaded; then say "  state   loaded, not running (launchd retries every few seconds)"
+      else say "  state   not loaded"; fi ;;
+    *)
+      say "  state   no service manager on this machine (neither systemd nor launchd)" ;;
+  esac
   service_status_short
 }
 
@@ -537,7 +866,9 @@ ${B}$APP_NAME${R} — installer and service manager
   ${B}$SELF logs${R} [-f]            service log
 
 Options
-  --system            machine-wide service under a dedicated account (needs root)
+  --system            machine-wide service under a dedicated account (needs root);
+                      remembered, so later commands need not repeat it
+  --user              the per-user service, even where a --system one exists
   --port N            default $PORT
   --host ADDR         default $HOST  (127.0.0.1 keeps it off the network)
   --branch NAME       default $DEFAULT_BRANCH
@@ -548,7 +879,9 @@ Options
   --purge             with uninstall, also delete the data directory
   -y, --yes           do not prompt
 
-A user service needs no root and survives reboots once lingering is on.
+A user service needs no root and survives reboots once lingering is on. On
+macOS the service is a LaunchAgent that runs while you are logged in, and its
+log is $LOG_FILE.
 Your entries live in the data directory, which is never inside the application
 directory, so updating cannot touch them.
 USAGE
@@ -556,41 +889,77 @@ USAGE
 
 # -------------------------------------------------------------------- parse --
 
+# Every option that takes a value has to be given one. Without this check a
+# trailing --port ends the script with "$2: unbound variable" (set -u), and
+# "--port --host x" quietly takes "--host" as the port.
+need_value() {
+  if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value  (try --help)"; fi
+  case "$2" in -*) die "$1 needs a value, but got $2  (try --help)" ;; esac
+}
+
+# A relative --dir or --data would be written into the unit as is, and the
+# service does not start from the directory you ran this in.
+absolute() {
+  case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s\n' "$PWD/$1" ;; esac
+}
+
 ACTION=""
 SUBACTION=""
+SHOW_HELP=0
+MODE_SET=0
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|update|uninstall|status|start|stop|restart|logs|doctor) ACTION="$1"; shift ;;
+    install|update|uninstall|status|start|stop|restart|logs) ACTION="$1"; shift ;;
     service) ACTION="service"; shift; SUBACTION="${1:-}"; [ $# -gt 0 ] && shift ;;
-    --system) MODE="system"; shift ;;
-    --user)   MODE="user"; shift ;;
-    --port)   PORT="$2"; PORT_SET=1; shift 2 ;;
-    --host)   HOST="$2"; HOST_SET=1; shift 2 ;;
-    --branch) BRANCH="$2"; shift 2 ;;
-    --dir)    APP_DIR="$2"; DIR_SET=1; shift 2 ;;
-    --data)   DATA_DIR="$2"; DATA_SET=1; shift 2 ;;
-    --backups) BACKUP_DIR="$2"; BACKUP_SET=1; shift 2 ;;
+    --system) MODE="system"; MODE_SET=1; shift ;;
+    --user)   MODE="user"; MODE_SET=1; shift ;;
+    --port)   need_value "$@"; PORT="$2"; PORT_SET=1; shift 2 ;;
+    --host)   need_value "$@"; HOST="$2"; HOST_SET=1; shift 2 ;;
+    --branch) need_value "$@"; BRANCH="$2"; shift 2 ;;
+    --dir)    need_value "$@"; APP_DIR="$(absolute "$2")"; DIR_SET=1; shift 2 ;;
+    --data)   need_value "$@"; DATA_DIR="$(absolute "$2")"; DATA_SET=1; shift 2 ;;
+    --backups) need_value "$@"; BACKUP_DIR="$(absolute "$2")"; BACKUP_SET=1; shift 2 ;;
     --no-service) NO_SERVICE=1; shift ;;
     --purge)  PURGE=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -f|--follow) ARGS+=("-f"); shift ;;
-    -h|--help) usage; exit 0 ;;
+    -h|--help) SHOW_HELP=1; shift ;;
     *) die "Unknown argument: $1  (try --help)" ;;
   esac
 done
 
-# A machine-wide install belongs in the machine-wide places, unless the command
-# line said otherwise.
-if [ "$MODE" = "system" ]; then
-  [ "$DIR_SET"  = 0 ] && APP_DIR="/opt/$SERVICE_NAME"
-  [ "$DATA_SET" = 0 ] && DATA_DIR="/var/lib/$SERVICE_NAME"
-  [ "$BACKUP_SET" = 0 ] && BACKUP_DIR="/var/backups/$SERVICE_NAME"
+case "$PORT" in
+  ""|*[!0-9]*) die "The port has to be a number, not \"$PORT\"." ;;
+esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "The port has to be between 1 and 65535, not $PORT."
+
+SVC="$(service_manager)"
+if [ "$MODE" = "system" ] && [ "$SVC" != "systemd" ]; then
+  if [ "$SVC" = "launchd" ]; then
+    die "--system is for Linux. On macOS the service is a per-user LaunchAgent,
+  which needs no root; leave --system out."
+  fi
+  die "--system needs systemd, and this machine does not have it."
 fi
 
-# Snapshots live beside the data they protect, so moving the data moves them.
-if [ "$BACKUP_SET" = 0 ] && [ "$DATA_SET" = 1 ]; then
-  BACKUP_DIR="$(cd "$(dirname "$DATA_DIR")" 2>/dev/null && pwd || dirname "$DATA_DIR")/backups"
+# --system is remembered too: with a machine-wide unit in place and no user
+# one, later commands act on the machine-wide one without being told again.
+# --user says otherwise.
+if [ "$SVC" = "systemd" ] && [ "$MODE_SET" = 0 ] && [ ! -f "$(unit_path)" ] \
+   && [ -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
+  MODE="system"
+fi
+
+# The defaults for this mode, before anything on the command line or in the
+# unit; the snapshot directory below needs to know whether the data moved.
+if [ "$MODE" = "system" ]; then
+  default_data="/var/lib/$SERVICE_NAME"
+  [ "$DIR_SET"  = 0 ] && APP_DIR="/opt/$SERVICE_NAME"
+  [ "$DATA_SET" = 0 ] && DATA_DIR="$default_data"
+  [ "$BACKUP_SET" = 0 ] && BACKUP_DIR="/var/backups/$SERVICE_NAME"
+else
+  default_data="$data_home/$SERVICE_NAME/data"
 fi
 
 # Once a unit exists it is the record of where things went and on what port, so
@@ -601,29 +970,79 @@ load_unit_settings() {
   local unit; unit="$(unit_path)"
   [ -f "$unit" ] || return 0
   local v
-  v="$(sed -n 's/^Environment=BT_PORT=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
-  v="$(sed -n 's/^Environment=BT_HOST=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
-  v="$(sed -n 's/^Environment=BT_DATA_DIR=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
-  v="$(sed -n 's/^WorkingDirectory=//p' "$unit" | tail -1)"; [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+  if [ "$SVC" = "launchd" ]; then
+    v="$(plist_value "$unit" BT_PORT)";          [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
+    v="$(plist_value "$unit" BT_HOST)";          [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
+    v="$(plist_value "$unit" BT_DATA_DIR)";      [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
+    v="$(plist_value "$unit" WorkingDirectory)"; [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+    v="$(plist_value "$unit" StandardOutPath)";  [ -n "$v" ] && LOG_FILE="$v"
+  else
+    v="$(unit_env "$unit" BT_PORT)";     [ -n "$v" ] && [ "$PORT_SET" = 0 ] && PORT="$v"
+    v="$(unit_env "$unit" BT_HOST)";     [ -n "$v" ] && [ "$HOST_SET" = 0 ] && HOST="$v"
+    v="$(unit_env "$unit" BT_DATA_DIR)"; [ -n "$v" ] && [ "$DATA_SET" = 0 ] && DATA_DIR="$v"
+    v="$(unit_workdir "$unit")";         [ -n "$v" ] && [ "$DIR_SET" = 0 ] && APP_DIR="$v"
+  fi
   return 0
 }
 load_unit_settings
+
+# Snapshots live beside the data they protect, so moving the data moves them -
+# whether it moved on this command line or at install time, which is why this
+# comes after the unit is read. A data directory called "data" gets a
+# "backups" next to it, as the default layout has; anything else gets
+# "<name>-backups", so --data ~/baby does not snapshot into a vague ~/backups.
+if [ "$BACKUP_SET" = 0 ] && [ "$DATA_DIR" != "$default_data" ]; then
+  case "$(basename "$DATA_DIR")" in
+    data) BACKUP_DIR="$(dirname "$DATA_DIR")/backups" ;;
+    *)    BACKUP_DIR="${DATA_DIR%/}-backups" ;;
+  esac
+fi
+
+# Piped from curl, $0 is "bash" and there is no script file in the current
+# directory, so the hints name the copy that install puts in the app directory.
+case "${0##*/}" in
+  bash|sh|-bash|-sh|"") SELF="$(sh_word "$APP_DIR/scripts/install.sh")" ;;
+  *) SELF="$0" ;;
+esac
+
+if [ "$SHOW_HELP" = 1 ]; then usage; exit 0; fi
 
 case "${ACTION:-}" in
   install|update|uninstall) check_layout ;;
   service) if [ "$SUBACTION" = "add" ]; then check_layout; fi ;;
 esac
 
+# However the script ends, leave no half-fetched copy behind, and never leave
+# the tracker switched off: if an update stopped the service and then failed,
+# start it again on whatever code is in place - the old code, unless the
+# failure came after the switch. A tracker that is down at 3am is worse than
+# one running last week's revision.
+RESTART_ON_EXIT=0
+on_exit() {
+  local status=$?
+  if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
+  if [ "$RESTART_ON_EXIT" = "1" ]; then
+    RESTART_ON_EXIT=0
+    warn "The update did not finish; starting the service again."
+    if service_start >/dev/null 2>&1; then
+      ok "Service started again"
+    else
+      warn "It would not start. See: $SELF status"
+    fi
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+
 case "${ACTION:-}" in
   install)   do_install ;;
   update)    do_update ;;
   uninstall) do_uninstall ;;
   status)    do_status ;;
-  start)     sc start "$SERVICE_NAME"; service_status_short ;;
-  stop)      sc stop "$SERVICE_NAME"; ok "Stopped" ;;
-  restart)   sc restart "$SERVICE_NAME"; service_status_short ;;
-  logs)      if [ "$MODE" = system ]; then sudo journalctl -u "$SERVICE_NAME" -n 100 "${ARGS[@]+"${ARGS[@]}"}";
-             else journalctl --user -u "$SERVICE_NAME" -n 100 "${ARGS[@]+"${ARGS[@]}"}"; fi ;;
+  start)     require_service; service_start; sleep 1; service_status_short ;;
+  stop)      require_service; service_stop; ok "Stopped" ;;
+  restart)   require_service; service_restart; sleep 1; service_status_short ;;
+  logs)      require_service; service_logs 100 "${ARGS[@]+"${ARGS[@]}"}" ;;
   service)
     case "$SUBACTION" in
       add)    check_node; verify_app; service_add ;;

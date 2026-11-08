@@ -4,17 +4,22 @@ import {
   state, config, currentBaby, currentUser, settings,
   refresh, render, setRenderer, saveConfig, toast, closeSheet, sheetOpen,
   quickLog, openLogSheet, stopRunningTimer, cancelRunningTimer, switchFeedSide, applyTheme,
-  isUnlocked, lockProfile, onRefresh,
+  isUnlocked, lockProfile, onRefresh, setUnlocker,
 } from './core.js';
 import { api, subscribe } from './api.js';
 import * as sound from './sound.js';
+import {
+  registerWorker, showAlarm, requestPermission, notifyState, permissionText,
+} from './notify.js';
 import { $, esc, store, fmtClock, fmtSpan, babyAge, ringState } from './util.js';
 import { toneStyle, typeOf } from './ui.js';
 import {
   renderTrack, renderHistory, renderAlarms, openNutrientSheet,
   loadNutrition, nutritionKey,
 } from './views.js';
-import { renderStats, loadStats, statsKey } from './stats.js';
+import {
+  renderStats, loadStats, statsKey, statsScope,
+} from './stats.js';
 import { openReportSheet } from './report.js';
 import { toggleTable, downloadChart } from './charts.js';
 import { wireTips } from './tips.js';
@@ -225,16 +230,11 @@ function startRing(inst) {
   sound.startRinging();
   sound.buzz([200, 120, 200, 120, 400]);
   showRingOverlay(inst);
-  if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && notified !== inst.key) {
+  if (document.hidden && notifyState() === 'granted' && notified !== inst.key) {
     notified = inst.key;
-    try {
-      const n = new Notification(`${inst.emoji} ${inst.label}`, {
-        body: `${inst.babyName} — it's time.`,
-        tag: inst.key,
-        requireInteraction: true,
-      });
-      n.onclick = () => { window.focus(); n.close(); };
-    } catch { /* notifications unavailable */ }
+    // Through the service worker where there is one (Android insists), and
+    // the plain constructor otherwise; see notify.js. It logs its own failures.
+    showAlarm(`${inst.emoji} ${inst.label}`, { body: `${inst.babyName} — it's time.`, tag: inst.key });
   }
 }
 
@@ -304,8 +304,13 @@ function chartFooter() {
 /** Fetch the Statistics slice if what we hold is for another baby or range. */
 async function ensureStats() {
   if (state.tab !== 'stats' || state.stats.key === statsKey()) return;
-  state.stats = { ...state.stats, loading: true, error: null };
-  render();
+  // Another baby or range has nothing worth showing until it arrives. The same
+  // one at a newer revision - something was logged since - is refetched behind
+  // the charts already drawn, rather than blanking them for a moment.
+  if (state.stats.scope !== statsScope() || state.stats.error) {
+    state.stats = { ...state.stats, loading: true, error: null };
+    render();
+  }
   await loadStats();
   render();
 }
@@ -357,11 +362,29 @@ const ACTIONS = {
     if (isUnlocked(id)) return select();
     unlockProfile(id, select);
   },
+  /**
+   * Locking has to move the app off this person too. Clearing the unlock alone
+   * left them selected, and every one-tap log went on going under their name
+   * with no PIN until a reload. The app moves to someone it may log as; when
+   * there is nobody, the PIN pad asks for one.
+   */
   'lock-profile': () => {
-    lockProfile(state.userId);
+    const locked = state.userId;
+    lockProfile(locked);
     sound.play('undo');
-    toast({ icon: '🔒', text: 'Profile locked', tone: 'lavender', ms: 2000 });
+    const next = config().users.find((u) => u.id !== locked && isUnlocked(u.id));
+    if (next) {
+      state.userId = next.id;
+      store.set('userId', next.id);
+    }
+    toast({
+      icon: '🔒',
+      text: next ? `Profile locked · logging as <b>${esc(next.name)}</b>` : 'Profile locked',
+      tone: 'lavender',
+      ms: 2500,
+    });
     render();
+    if (!next) ensureProfileUnlocked();
   },
   'theme-cycle': () => {
     const order = ['auto', 'light', 'dark'];
@@ -479,9 +502,7 @@ const ACTIONS = {
       const insts = (state.data?.alarms || []).filter((i) => i.alarmId === el.dataset.id);
       return Promise.all(insts.map((i) => api.armAlarm(i.key))).then(refresh);
     });
-    if (on && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
+    if (on && notifyState() === 'default') requestPermission().then(render);
     sound.play(on ? 'success' : 'undo');
   },
   'snooze-alarm': async (el) => {
@@ -498,9 +519,9 @@ const ACTIONS = {
     await refresh();
   },
   'ask-notify': async () => {
-    if (!('Notification' in window)) return toast({ icon: '🔕', text: 'This browser has no notifications', tone: 'peach' });
-    const res = await Notification.requestPermission();
-    toast({ icon: res === 'granted' ? '🔔' : '🔕', text: `Notifications ${res}`, tone: res === 'granted' ? 'mint' : 'peach' });
+    const res = await requestPermission();
+    const on = res === 'granted';
+    toast({ icon: on ? '🔔' : '🔕', text: esc(permissionText(res)), tone: on ? 'mint' : 'peach' });
     render();
   },
 };
@@ -539,6 +560,8 @@ function ensureProfileUnlocked() {
 
 async function boot() {
   setRenderer(renderAll);
+  setUnlocker(unlockProfile);
+  registerWorker();
   applyTheme('auto');
   onRefresh(() => (state.tab === 'stats' ? loadStats() : null));
   onRefresh(() => (state.tab === 'track' ? loadNutrition() : null));

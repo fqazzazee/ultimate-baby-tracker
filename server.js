@@ -150,12 +150,24 @@ function buildState(url) {
   const babyId = url.searchParams.get('babyId') || 'all';
   const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 7));
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  // The cap scales with the window. A flat 1000 was hit at about 33 entries a
+  // day over History's 30 - an ordinary day for twins, or a newborn with
+  // pumping - and the oldest days just disappeared from the list. 200 a day is
+  // one every seven minutes around the clock; past that the cap still guards
+  // the payload, and `eventsTruncated` says so rather than leaving it silent.
+  const cap = Math.max(1000, days * 200);
+  const events = store.listEvents({ babyId, since, limit: cap + 1 });
+  const eventsTruncated = events.length > cap;
+  if (eventsTruncated) events.length = cap;
   return {
     rev: store.getRevision(),
     app: APP,
     serverTime: new Date().toISOString(),
     config,
-    events: store.listEvents({ babyId, since, limit: 1000 }),
+    events,
+    // True when `events` stops short of `days` because of the cap above: the
+    // list is the newest entries in the window, not all of them.
+    eventsTruncated,
     timers: store.listTimers(),
     alarms: computeAlarmInstances(config),
     totalEvents: store.eventCount(),
@@ -285,8 +297,22 @@ async function handleAPI(req, res, url) {
   if (resource === 'config' && method === 'PUT') {
     const body = await readBody(req);
     if (!body || typeof body !== 'object') return sendJSON(res, 400, { error: 'config object required' });
-    store.saveConfig(body);
-    return sendJSON(res, 200, { ok: true, config: store.publicConfig(), rev: store.getRevision() });
+    // The revision the client edited comes back inside the config it was
+    // given. One that is missing (an older page, a script) is not checked.
+    const expectRev = Number.isInteger(body.configRev) ? body.configRev : null;
+    try {
+      store.saveConfig(body, { expectRev });
+    } catch (err) {
+      if (!err.conflict) throw err;
+      // The current config rides along, so a client can show what is there now.
+      return sendJSON(res, 409, {
+        error: err.message, code: err.conflict, config: store.publicConfig(),
+        configRev: store.configRevision(), rev: store.getRevision(),
+      });
+    }
+    return sendJSON(res, 200, {
+      ok: true, config: store.publicConfig(), configRev: store.configRevision(), rev: store.getRevision(),
+    });
   }
 
   if (resource === 'events') {
@@ -325,7 +351,17 @@ async function handleAPI(req, res, url) {
     if (method === 'POST' && !id) {
       const body = await readBody(req);
       if (!body.typeId || !body.babyId) return sendJSON(res, 400, { error: 'babyId and typeId are required' });
-      return sendJSON(res, 201, { timer: store.startTimer(body), rev: store.getRevision() });
+      try {
+        return sendJSON(res, 201, { timer: store.startTimer(body), rev: store.getRevision() });
+      } catch (err) {
+        if (!err.conflict) throw err;
+        // 409 rather than 404 for a timer that has gone: the route exists, it is
+        // the caller's picture of what is running that is out of date. `code`
+        // says which way, and `timer` is what is actually running, if anything.
+        return sendJSON(res, 409, {
+          error: err.message, code: err.conflict, timer: err.running, rev: store.getRevision(),
+        });
+      }
     }
     if (method === 'POST' && id && action === 'stop') {
       const body = await readBody(req);
@@ -375,10 +411,13 @@ async function handleAPI(req, res, url) {
         return sendJSON(res, 200, { ok: true, rev: store.getRevision() });
       }
       if (action === 'dismiss') {
+        // `lastCycleAt` is left alone. It is the base an "Every" alarm counts
+        // from, and moving it to the moment of dismissal made a 2-hourly alarm
+        // drift later by however long each ring took to answer - not the fixed
+        // cadence it promises. `dismissedForDueAt` is what stops the ring.
         store.setAlarmState(key, {
           dismissedForDueAt: body.dueAt || null,
           snoozedUntil: null,
-          lastCycleAt: new Date().toISOString(),
         });
         return sendJSON(res, 200, { ok: true, rev: store.getRevision() });
       }

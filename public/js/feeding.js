@@ -21,11 +21,12 @@
  *    someone holding a baby with the other arm.
  *
  * What *is* sent is the side currently nursing, by re-issuing the timer with
- * its original `startedAt` — every backend replaces a running timer for the
- * same baby and button rather than stacking a second one, and every backend
- * honours a `startedAt` it is handed, so the elapsed total never resets. That
- * keeps the running-timer card honest on a second device without inventing a
- * verb for it.
+ * its original `startedAt` and the id of the timer it `replaces`. Every backend
+ * honours a `startedAt` it is handed, so the elapsed total never resets. The
+ * Node server also uses `replaces` to refuse a switch tapped on a stale card
+ * after the feed was stopped elsewhere (409), so the feed is not brought back
+ * and logged twice; a backend that does not know the field ignores it and
+ * replaces the running timer for that baby and button, as it always did.
  *
  * If this browser's record is missing when the timer stops — the feed was
  * started on a phone and stopped on a laptop — the entry falls back to exactly

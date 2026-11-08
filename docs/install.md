@@ -57,25 +57,39 @@ Line Tools.
 ./scripts/install.sh logs [-f]        # the service log
 ```
 
+Later commands remember the port, host and directories the service was
+installed with, so `update`, `status` and the rest need no flags repeated.
+Paths may contain spaces.
+
 On Linux this writes a **systemd user unit** to
 `~/.config/systemd/user/`, which needs no root — tested on Fedora. It enables
 lingering so the service survives a logout and starts at boot; if the policy
 refuses, the script says so and prints the one command that fixes it. Add
 `--system` for a machine-wide unit running under its own unprivileged account
-(that one does need root, and is hardened with `ProtectSystem=strict`).
+(that one does need root, and is hardened with `ProtectSystem=strict`). It is
+remembered: once a system unit exists, later commands use it without the flag,
+and `--user` picks the per-user one instead.
 
-Without systemd — macOS, a container, a distro that went its own way — install
-still works and just tells you the command to run it with. There is then no
-background service: the server runs while that terminal is open, and `start`,
-`stop`, `restart` and `logs` do not apply. On a Mac, `caffeinate -i` in front of
-the command keeps the machine from sleeping while it runs.
+On macOS this writes a **LaunchAgent** to
+`~/Library/LaunchAgents/com.github.fqazzazee.ultimate-baby-tracker.plist`, which
+also needs no root. It starts when you log in and restarts the server if it
+stops; `logs` reads `~/.local/share/ultimate-baby-tracker/server.log`. It runs
+while you are logged in, so a Mac that reboots unattended should log in
+automatically. Installed over SSH with nobody logged in at the screen, it starts
+at the next login. Keep the app and data out of Documents, Desktop, Downloads
+and iCloud Drive: macOS does not let a background service read them, and the
+installer warns if you try.
+
+With neither systemd nor launchd — a container, a distro that went its own way —
+install still works and tells you the command to run it with. There is then no
+background service, and `start`, `stop`, `restart` and `logs` say so.
 
 | Option | |
 | --- | --- |
 | `--port N` `--host ADDR` | defaults `8477` and `0.0.0.0`; `127.0.0.1` keeps it off the network |
 | `--dir` `--data` `--backups` | where the app, your entries and the update snapshots go |
 | `--branch NAME` | track a branch other than `main` |
-| `--system` | machine-wide unit instead of a user one |
+| `--system` | machine-wide unit instead of a user one (Linux) |
 | `--no-service` | install the files, skip the service |
 
 ### Windows
@@ -86,6 +100,12 @@ the command keeps the machine from sleeping while it runs.
 .\scripts\install.cmd status
 .\scripts\install.cmd service remove
 ```
+
+After the install, the copy to use is the one inside the app:
+`& "$env:LOCALAPPDATA\UltimateBabyTracker\app\scripts\install.cmd" update` — the
+installer prints that line, and it is the only one there is if you installed
+with the one-liner below. Later commands remember `-Port`, `-Listen`, `-Dir`
+and `-Data`, so pass them only to change them.
 
 **Use `install.cmd`, not `install.ps1` directly.** PowerShell's execution policy
 is `Restricted` for a standard user, so an unsigned `.ps1` will not run at all —
@@ -114,19 +134,23 @@ runs `wscript.exe`, not PowerShell.
 
 A real Windows Service needs administrator rights, so this registers a **per-user
 Scheduled Task** that starts at logon instead, running as you with no console
-window and restarting itself if it falls over. For a machine you log into, that
+window. If the server crashes it is started again after five seconds, giving up
+after five quick failures in a row; stop it with `install.cmd stop` rather than
+Task Manager, or it comes straight back. For a machine you log into, that
 is the same thing in practice, and it is the only kind of background job an
 unprivileged account is allowed to create.
 
 ### What updating does, and does not, touch
 
 Your entries never live inside the application directory, so an update cannot
-reach them. Before one, the installer snapshots the whole data directory to
-`backups/` anyway and keeps the last ten. The update itself stops the service,
-resets the checkout to the latest revision on the branch, rewrites the unit or
-launcher in case the Node path moved, and starts it again — then prints the
-commits it pulled in. The app directory is not for your own edits: an update
-replaces whatever is there.
+reach them. An update first downloads the new revision while the tracker keeps
+running, so a network failure changes nothing. Only then does it stop the
+service, snapshot the whole data directory to `backups/` (keeping the last
+ten), switch to the new code, rewrite the unit or launcher in case the Node
+path moved, and start it again — then print the commits it pulled in. If
+anything fails after the stop, the service is started again before the
+installer exits. `--branch` (`-Branch`) switches to another branch. The app
+directory is not for your own edits: an update replaces whatever is there.
 
 The installers check the layout before they touch anything. They will not
 install into a directory that already holds something other than the app, will
@@ -142,7 +166,8 @@ downloading the branch archive and says that updates will re-download the lot.
 
 Long form on Linux and macOS; the same options on Windows are PowerShell
 parameters (`-Port`, `-Listen`, `-Dir`, `-Data`, `-Backups`, `-Branch`,
-`-NoService`, `-Purge`). `--system` and `-y` are Linux and macOS only.
+`-NoService`, `-Purge`). `--system`, `--user` and `-y` are Linux and macOS
+only.
 
 | Flag | Default | |
 | --- | --- | --- |
@@ -150,9 +175,10 @@ parameters (`-Port`, `-Listen`, `-Dir`, `-Data`, `-Backups`, `-Branch`,
 | `--host ADDR` | `0.0.0.0` | `127.0.0.1` keeps it off the network entirely |
 | `--dir PATH` | `~/.local/share/ultimate-baby-tracker/app` | where the app goes |
 | `--data PATH` | `…/data` | where your entries go |
-| `--backups PATH` | beside the data | where update snapshots go |
+| `--backups PATH` | beside the data | where update snapshots go: `backups` next to a data folder called `data`, otherwise `<data>-backups` |
 | `--branch NAME` | `main` | track a different branch |
-| `--system` | off | machine-wide unit under its own account (needs root) |
+| `--system` | off | machine-wide unit under its own account (Linux, needs root); remembered |
+| `--user` | | the per-user service even where a system one exists |
 | `--no-service` | off | install the files, skip the service |
 | `--purge` | off | with `uninstall`, delete the data directory too |
 | `-y`, `--yes` | off | allow an install under `/tmp` |
@@ -164,8 +190,8 @@ parameters (`-Port`, `-Listen`, `-Dir`, `-Data`, `-Backups`, `-Branch`,
 | App | `~/.local/share/ultimate-baby-tracker/app` | `%LOCALAPPDATA%\UltimateBabyTracker\app` |
 | Data | `…/data` | `%LOCALAPPDATA%\UltimateBabyTracker\data` |
 | Snapshots | `…/backups` | `%LOCALAPPDATA%\UltimateBabyTracker\backups` |
-| Service | `~/.config/systemd/user/ultimate-baby-tracker.service` | Scheduled task `UltimateBabyTracker` |
-| Log | `journalctl --user -u ultimate-baby-tracker` (Linux; on macOS, the terminal it runs in) | `%LOCALAPPDATA%\UltimateBabyTracker\service.log` |
+| Service | `~/.config/systemd/user/ultimate-baby-tracker.service`; on macOS `~/Library/LaunchAgents/com.github.fqazzazee.ultimate-baby-tracker.plist` | Scheduled task `UltimateBabyTracker` |
+| Log | `journalctl --user -u ultimate-baby-tracker`; on macOS `~/.local/share/ultimate-baby-tracker/server.log` | `%LOCALAPPDATA%\UltimateBabyTracker\service.log` |
 
 `--system` moves those to `/opt`, `/var/lib`, `/var/backups` and
 `/etc/systemd/system`, and runs the service as its own `babytracker` account.

@@ -61,18 +61,64 @@ export function enabledMilks(cfg) {
 }
 
 /**
- * Which milk an entry counts as. The picker stores the profile's name, so
- * match on that first; a breastfeed with no picker falls back to whatever
+ * Profiles deleted in Setup. Kept, out of sight, so that an entry logged
+ * against one goes on counting what was in that bottle - see openMilkSheet.
+ */
+export function retiredMilks(cfg) {
+  const list = cfg?.nutrition?.retiredMilks;
+  return Array.isArray(list) ? list : [];
+}
+
+/**
+ * The profile an entry's picker named, or null.
+ *
+ * By id first: entries logged since the picker started storing one carry
+ * `<field>Id` beside the name, and an id survives a rename. Then by name, for
+ * the months of entries that only ever stored the name - the profile's current
+ * name, then any name it had before (`aliases`, kept by the milk editor), then
+ * a deleted profile's. Current names come before old ones so that a profile
+ * someone has since named "Formula" is not beaten by one that used to be.
+ */
+export function findMilk(cfg, { id = null, name = null } = {}) {
+  const milks = cfg?.nutrition?.milks || [];
+  const retired = retiredMilks(cfg);
+  if (id) {
+    const hit = milks.find((m) => m.id === id) || retired.find((m) => m.id === id);
+    if (hit) return hit;
+  }
+  if (!name) return null;
+  const was = (m) => Array.isArray(m.aliases) && m.aliases.includes(name);
+  return milks.find((m) => m.name === name || m.id === name)
+    || milks.find(was)
+    || retired.find((m) => m.name === name || m.id === name)
+    || retired.find(was)
+    || null;
+}
+
+/**
+ * The key a button's milk picker writes to. `milk` on the two that ship; a
+ * button of your own may have called its picker something else.
+ */
+export function milkFieldKey(cfg, typeId) {
+  const type = (cfg?.eventTypes || []).find((t) => t.id === typeId);
+  return (type?.fields || []).find((f) => f.optionsFrom === 'milks')?.key || 'milk';
+}
+
+/**
+ * Which milk an entry counts as. The profile the picker named, by id or by
+ * name (see findMilk); a breastfeed with no picker falls back to whatever
  * profile is marked as breast milk, and everything else to the chosen default.
  */
 export function milkFor(cfg, event) {
   const milks = cfg?.nutrition?.milks || [];
   const live = enabledMilks(cfg);
-  const picked = event?.data?.milk;
-  // An explicit choice wins even if that profile has since been switched off -
-  // it is what was actually in the bottle.
-  if (picked) {
-    const hit = milks.find((m) => m.name === picked || m.id === picked);
+  const key = milkFieldKey(cfg, event?.typeId);
+  const picked = event?.data?.[key];
+  const pickedId = event?.data?.[`${key}Id`];
+  // An explicit choice wins even if that profile has since been switched off,
+  // renamed or deleted - it is what was actually in the bottle.
+  if (picked || pickedId) {
+    const hit = findMilk(cfg, { id: pickedId, name: picked });
     if (hit) return hit;
   }
   if (event?.typeId === 'breast') {

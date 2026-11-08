@@ -40,11 +40,13 @@
  */
 
 import { state, config, currentBaby, openSheet, closeSheet, toast } from './core.js';
-import { api, saveFile } from './api.js';
+import { saveFile } from './api.js';
 import * as sound from './sound.js';
 import { esc, babyAge } from './util.js';
 import { UNIT_SYSTEMS, unitSystem } from './units.js';
-import { analyse, chartSections, summaryCard, STATS_RANGES } from './stats.js';
+import {
+  analyse, chartSections, summaryCard, fetchSlice, STATS_RANGES,
+} from './stats.js';
 import { slug } from './charts.js';
 
 /**
@@ -275,18 +277,12 @@ function chartListHTML() {
  * behind the sheet on its way through.
  */
 async function readRange(cfg, baby, days, units) {
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
-  since.setDate(since.getDate() - (days - 1));
-
-  const { events } = await api.events({
-    babyId: state.babyId || 'all',
-    since: since.toISOString(),
-    limit: 20000,
-  });
+  // The same slice the Statistics screen reads, carried-in sleep included, so
+  // a report never disagrees with the screen it was built from.
+  const { events, carry } = await fetchSlice(state.babyId || 'all', days);
 
   const asked = { ...cfg, settings: { ...(cfg.settings || {}), units } };
-  const { rows, avg, sum } = analyse(asked, events, days, REPORT_WIDTH);
+  const { rows, avg, sum } = analyse(asked, events, days, REPORT_WIDTH, carry);
   const sections = chartSections(asked, {
     rows, avg, sum, events, days, baby, width: REPORT_WIDTH,
   });
@@ -335,7 +331,9 @@ async function generate(baby) {
  */
 function chartBlock(section, withTable) {
   const p = section.parts;
-  const sub = stripTags(p.subtitle || '');
+  // Plain text, as on the screen - see chartCard. Stripping tags instead would
+  // quietly eat an option somebody really did call "<3 cuddles".
+  const sub = p.subtitle || '';
   const table = withTable && p.table
     ? `<details class="rep-data">
         <summary>Every value · ${bodyRows(p.table)} row${bodyRows(p.table) === 1 ? '' : 's'}</summary>
@@ -363,11 +361,6 @@ function chartBlock(section, withTable) {
  */
 function bodyRows(table) {
   return (String(table).match(/<tr><th scope="row">/g) || []).length;
-}
-
-/** Subtitles carry a little markup; a summary line wants plain text. */
-function stripTags(html) {
-  return String(html).replace(/<[^>]*>/g, '');
 }
 
 /** "24 Aug – 6 Sep 2026", or just the day when the range is one. */

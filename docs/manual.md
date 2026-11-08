@@ -40,7 +40,9 @@ seconds afterwards, so a mis-tap costs nothing.
   the single column.
 
 **History** — everything logged, grouped by day, filterable by type, with daily
-totals. Tap any entry to edit or delete it. Exports to CSV: the current baby's
+totals. Tap any entry to edit or delete it — editing changes only the fields
+you can see, so anything else an entry carries (which breast a feed started on,
+the data of a button you have since deleted) is kept. Exports to CSV: the current baby's
 entries, with the columns `when, baby, who, what, preset, amount, amount_unit,
 duration_min, details, note`.
 
@@ -177,6 +179,10 @@ Kirkland, Earth's Best, HiPP and whole cow's milk — each carrying its label
 values per 100 mL of *prepared* feed. Add your own with **➕ Add a milk or
 formula**, or open any of them and correct the numbers.
 
+Renaming a profile does not change the feeds already logged with it: they keep
+its nutrition under the new name. Deleting one stops it being offered for new
+feeds, but past feeds that used it still count with its numbers.
+
 The two Bobbie profiles are taken straight off Bobbie's own panels for the
 14.1 oz cans, which state *"diluted: each 5 fl oz (150 mL) contains 100
 calories"* over a per-100-Calorie table. Bobbie's 24 oz and 12.7 oz cans of the
@@ -250,7 +256,7 @@ have not happened yet are left off rather than drawn as zeros.
 | **Milk in** | Is intake holding up? With cc/kg/day when a weight is set |
 | **Feeds** | How often, regardless of volume |
 | **Diapers** | Wet and dirty side by side — the everyday hydration check |
-| **Sleep** | Total from timed sleeps, plus the longest stretch |
+| **Sleep** | Total from timed sleeps, plus the longest stretch. A sleep counts in the hours and days it actually covered, so a night from 21:00 to 06:00 is 3 hours on one day and 6 on the next, and the 1-day view includes last night |
 | **Pumped** | cc expressed per day — what came out, kept well away from intake so the bottle it becomes is never counted twice |
 | **Nursing by side** | Left against right in minutes — whether one breast is being favoured, and whether that is drifting |
 | **Nutrients** | One chart per nutrient you chose to show, each with the reference intake for a baby that age drawn across it |
@@ -258,7 +264,8 @@ have not happened yet are left off rather than drawn as zeros.
 
 Above them sits a row of daily averages. Today is deliberately left out of those
 averages — a day that is still filling up drags the mean down and makes the
-number lie.
+number lie. On the very first day there is nothing else to average, so the row
+shows today's totals and says so.
 
 **Charts follow Setup, two ways.** Untick *Sleep* in **Tracked metrics** and its
 chart and headline tile disappear along with its card on the Track screen; the
@@ -283,7 +290,9 @@ button and its metrics pair up side by side rather than taking a card each —
 at. Pairing is allowed only where both the unit and the summary agree:
 millilitres beside minutes is the one-y-axis rule broken, and a daily total
 beside a daily latest is subtler and worse, because the axis looks fine while
-the columns mean different things. Pairs are two at a time, because the chart
+the columns mean different things. Readings — a *latest* or an *average*, like
+a temperature — never pair: a day nobody measured has no value, and a column
+would have to draw it as zero. Pairs are two at a time, because the chart
 palette has two slots; a third compatible metric keeps its own chart rather than
 being drawn in a colour nobody has checked. The switch names the pairs it will
 make before you turn it on.
@@ -368,18 +377,30 @@ Three kinds, each configurable per baby:
 | --- | --- | --- |
 | **After last** | Rings `N` minutes after the last matching entry. Logging one resets the countdown. | "Feed if it's been 3 hours" |
 | **Every** | Fixed cadence regardless of activity. | Pumping every 2 hours |
-| **At time** | Wall-clock times, e.g. `08:00` and `20:00`. | Vitamin D, medication |
+| **At time** | Wall-clock times, e.g. `08:00` and `20:00`. `8:00 PM`, `8pm` and `20.00` work too, and are saved as `20:00`; a line that can't be read is refused when you save. | Vitamin D, medication |
 
 When one fires you get a full-screen card with **snooze** and **dismiss**, plus
 **log it now** when the alarm watches a button (which records the event and
-resets the alarm). Quiet hours keep it silent overnight.
+resets the alarm). An alarm nobody answers keeps ringing for up to an hour.
+Dismissing an *Every* alarm keeps its schedule — the next one is still on the
+hour it was due. Quiet hours keep it silent overnight.
 
-**It rings in the browser, so a page has to be open.** Allow notifications and a
-desktop browser will also show one while the tab is in the background. Phones
-suspend background tabs, so on a phone keep the app on screen if you are
-relying on it, and browsers only allow notifications over HTTPS or from
-`localhost` — see [SECURITY.md](../SECURITY.md#putting-it-behind-a-proxy).
-At-time alarms take 24-hour times, `20:00` rather than `8:00 PM`.
+Alarms ring even with **Sounds** switched off in Setup: that switch is only for
+the chime when something is logged. To silence an alarm, switch the alarm off
+or give it quiet hours. The volume slider applies to both.
+
+**It rings in the browser, so a page has to be open.** Allow notifications and
+a desktop browser will also show one while the tab is in the background. Phones
+pause a page whose screen is locked or whose browser is in the background, and
+nothing rings or notifies until you come back to it — so on a phone, keep the
+app on screen if you are relying on it.
+
+Notifications need `https://` or `http://localhost`; on a plain
+`http://<address>` the Alarms screen says they can't work there — see
+[SECURITY.md](../SECURITY.md#putting-it-behind-a-proxy). Over HTTPS the app
+registers a small service worker whose only job is showing them (Android will
+not show one any other way); it caches nothing. If notifications were blocked,
+allow them again in the browser's site settings and reload.
 
 The countdown is computed by the server but evaluated in the browser every
 second, so an alarm rings on time rather than at the next poll.
@@ -412,7 +433,12 @@ Any person can set a 4-digit PIN in **Setup → People → Edit**. Once set, the
 is asked for before you can switch to that person, edit their profile, or start
 the app as them — so entries don't get logged under the wrong name. An unlock
 lasts until the browser tab is closed, and the 🔒 chip at the end of the
-people chips re-locks immediately.
+people chips re-locks immediately — and moves you to someone without a lock,
+or asks for a PIN if everyone has one. Choosing a locked person under **Who**
+when logging or editing an entry asks for their PIN too.
+
+A timer is filed under whoever started it, whoever stops it; change the person
+in the entry afterwards if needed.
 
 PINs are stored as salted scrypt hashes and are never sent to the browser; the
 server only answers "yes" or "no", and five wrong guesses trigger a 30-second
@@ -427,7 +453,8 @@ See [SECURITY.md](../SECURITY.md) for what a four-digit PIN is and is not.
 **Setup → Data** has both halves:
 
 - **Download backup** writes a gzipped bundle —
-  `baby-tracker-backup-2026-08-25-1430.json.gz` — holding the config and every
+  `baby-tracker-backup-2026-08-25-1430-0400.json.gz` (local date and time,
+  then the offset from UTC) — holding the config and every
   entry, timer and alarm state. It is ordinary JSON inside, so `gunzip -c` on
   it gives you something readable and greppable.
 - **Restore from backup** takes that file back. The server unpacks it, reports
@@ -474,9 +501,9 @@ Either half works from the command line as well:
 
 ```sh
 curl -OJ http://localhost:8477/api/backup
-curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430.json.gz \
+curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430-0400.json.gz \
      'http://localhost:8477/api/restore?dryRun=1'     # look inside, change nothing
-curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430.json.gz \
+curl -X POST --data-binary @baby-tracker-backup-2026-08-25-1430-0400.json.gz \
      http://localhost:8477/api/restore                # actually restore
 ```
 
@@ -509,14 +536,14 @@ simplest backup there is.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/state?babyId=&days=` | Everything the UI needs in one call; `days` is 1–90, default 7 |
+| `GET` | `/api/state?babyId=&days=` | Everything the UI needs in one call; `days` is 1–90, default 7. Sends at most 200 entries per day of the range (never fewer than 1000), with `eventsTruncated: true` when it had to leave some out |
 | `GET` | `/api/stream` | Server-sent events; pushes on every change |
 | `GET` | `/api/events?babyId=&typeId=&since=&limit=` | List entries (`limit` defaults to 500) |
 | `POST` | `/api/events` | Create an entry — `typeId` and `babyId` required; answers `201 {event, rev}` |
 | `PATCH`/`DELETE` | `/api/events/:id` | Edit / remove an entry |
-| `PUT` | `/api/config` | Replace the whole config |
+| `PUT` | `/api/config` | Replace the whole config. It carries a `configRev`; send back the one you edited and a stale copy gets `409 {code: "config-stale", config, configRev}` with nothing written. A body without `configRev` is not checked |
 | `GET` | `/api/timers` | Timers currently running |
-| `POST` | `/api/timers`, `/api/timers/:id/stop` | Start / stop a timer (stopping logs the entry) |
+| `POST` | `/api/timers`, `/api/timers/:id/stop` | Start / stop a timer (stopping logs the entry). Starting one that baby and button already has running is `409 {code: "timer-running"}`; to re-issue a running timer (switching sides), send `replaces: <timer id>`, which is `409 {code: "timer-gone"}` if that timer was stopped meanwhile |
 | `DELETE` | `/api/timers/:id` | Cancel a timer without logging anything |
 | `GET` | `/api/alarms` | Every alarm, with when it is next due |
 | `POST` | `/api/alarms/:key/{snooze,dismiss,arm}` | Alarm control — snooze takes `{minutes}` (default 10), dismiss takes `{dueAt}` |

@@ -10,7 +10,7 @@ import {
 } from './util.js';
 import { setCustomUnits } from './units.js';
 import {
-  typeOf, userOf, babyOf, toneStyle, fieldsHTML, collectFields, wireFieldControls,
+  typeOf, userOf, babyOf, toneStyle, fieldsHTML, mergeFields, wireFieldControls,
 } from './ui.js';
 import {
   supportsSides, startSession, readSession, writeSession, clearSession,
@@ -62,28 +62,51 @@ let refreshing = null;
 const afterRefresh = [];
 export function onRefresh(fn) { afterRefresh.push(fn); }
 
-export async function refresh() {
-  if (refreshing) return refreshing;
+/**
+ * Set when refresh() is called while one is already in flight. That request
+ * may have been answered before the change the caller is reacting to - a
+ * quickLog's own refresh, or the event-stream ping for it - so simply awaiting
+ * it can leave the screen showing the old state until the next poll, and a tap
+ * that seems not to register invites a second one. Instead the running refresh
+ * goes round once more when it finishes. However many calls arrive meanwhile,
+ * that is one extra request, not one each.
+ */
+let refreshAgain = false;
+
+export function refresh() {
+  if (refreshing) {
+    refreshAgain = true;
+    return refreshing;
+  }
   refreshing = (async () => {
     try {
-      const data = await api.state(state.babyId || 'all', state.historyDays);
-      state.data = data;
-      state.connected = true;
-      reconcileSelections();
-      applySettings();
-      for (const fn of afterRefresh) {
-        try { await fn(); } catch (err) { console.warn('[refresh hook]', err.message); }
-      }
-      render();
-    } catch (err) {
-      state.connected = false;
-      console.warn('[refresh]', err.message);
-      render();
+      do {
+        refreshAgain = false;
+        await refreshOnce();
+      } while (refreshAgain);
     } finally {
       refreshing = null;
     }
   })();
   return refreshing;
+}
+
+async function refreshOnce() {
+  try {
+    const data = await api.state(state.babyId || 'all', state.historyDays);
+    state.data = data;
+    state.connected = true;
+    reconcileSelections();
+    applySettings();
+    for (const fn of afterRefresh) {
+      try { await fn(); } catch (err) { console.warn('[refresh hook]', err.message); }
+    }
+    render();
+  } catch (err) {
+    state.connected = false;
+    console.warn('[refresh]', err.message);
+    render();
+  }
 }
 
 /** Keep the selected baby/person pointing at something that still exists. */
@@ -111,6 +134,17 @@ function applySettings() {
   applyTheme(s.theme || 'auto');
 }
 
+/*
+ * Config saves go out one at a time, in order. The copy each one edits carries
+ * the `configRev` it was built from, and the server refuses (409) a copy that
+ * is out of date - which a second quick change on this same phone would be,
+ * since it was cloned before the first one's answer arrived. `ownSaves` maps a
+ * revision this page sent to the one its save produced, so a change queued
+ * behind our own is brought forward; one made on another device is not.
+ */
+let configSaving = Promise.resolve();
+const ownSaves = new Map();
+
 /** Persist a config change. `mutate` receives a deep copy to edit in place. */
 export async function saveConfig(mutate) {
   const next = structuredClone(config());
@@ -118,11 +152,26 @@ export async function saveConfig(mutate) {
   state.data = { ...state.data, config: next }; // optimistic
   applySettings();
   render();
-  try {
-    await api.saveConfig(next);
-  } catch (err) {
-    toast({ icon: '⚠️', text: `Could not save: ${err.message}`, tone: 'peach' });
-  }
+  const send = async () => {
+    while (ownSaves.has(next.configRev)) next.configRev = ownSaves.get(next.configRev);
+    try {
+      const sent = next.configRev;
+      const res = await api.saveConfig(next);
+      if (Number.isInteger(sent) && Number.isInteger(res?.configRev)) ownSaves.set(sent, res.configRev);
+    } catch (err) {
+      if (err.status === 409) {
+        // Someone else saved Setup since this phone last loaded it. Writing
+        // ours anyway would undo theirs, and replaying it on top of theirs is
+        // not safe for every edit (some address a list by position), so the
+        // refresh below puts their version on screen and the person redoes it.
+        toast({ icon: '🔄', text: 'Setup was just changed on another device, so this change was <b>not saved</b>. The screen now shows the latest setup — please make your change again.', tone: 'peach', ms: 9000 });
+      } else {
+        toast({ icon: '⚠️', text: `Could not save: ${esc(err.message)}`, tone: 'peach' });
+      }
+    }
+  };
+  configSaving = configSaving.then(send);
+  await configSaving;
   return refresh();
 }
 
@@ -179,6 +228,21 @@ export function markUnlocked(userId) {
 
 export function lockProfile(userId) {
   writeUnlocked(unlockedIds().filter((id) => id !== userId));
+}
+
+/**
+ * The PIN pad lives in settings.js, which imports this module; importing it
+ * back would close a cycle, so app.js hands it over at boot - the same
+ * arrangement as onRefresh. Called as (userId, onSuccess, onCancel).
+ */
+let unlocker = null;
+export function setUnlocker(fn) { unlocker = fn; }
+
+/** Run `then` as `userId`, asking for their PIN first if the profile is locked. */
+export function whenUnlocked(userId, then, onCancel) {
+  if (isUnlocked(userId)) return then();
+  if (unlocker) return unlocker(userId, then, onCancel);
+  toast({ icon: '🔒', text: 'That profile is locked', tone: 'peach' });
 }
 
 /* --------------------------------------------------------------- feedback */
@@ -287,6 +351,10 @@ export async function quickLog(typeId, presetId) {
     return;
   }
 
+  // The remembered profile can still be a locked one - the PIN pad shown at
+  // boot closes on Escape - and a one-tap log must not go under that name.
+  if (!isUnlocked(user.id)) return whenUnlocked(user.id, () => quickLog(typeId, presetId));
+
   // A measurement is numbers you have to type, so the button opens the form
   // rather than saving an empty entry you then have to go and fix.
   if (type.mode === 'form') return openLogSheet({ typeId, presetId: preset.id });
@@ -319,6 +387,9 @@ export async function quickLog(typeId, presetId) {
       await refresh();
     } catch (err) {
       toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
+      // Most often a 409: another phone is already timing this. Refreshing puts
+      // its timer on this card, where the next tap stops it.
+      await refresh();
     }
     return;
   }
@@ -392,6 +463,9 @@ export async function switchFeedSide(timerId, toSide) {
       typeId: timer.typeId,
       presetId: timer.presetId,
       startedAt: timer.startedAt,
+      // Names the timer being re-issued, so a server that has since seen it
+      // stopped on another phone refuses rather than bringing it back.
+      replaces: timer.id,
       data: { ...timer.data, side: toSide, firstSide: next.firstSide },
     });
     writeSession(reissued || timer, next);
@@ -399,6 +473,7 @@ export async function switchFeedSide(timerId, toSide) {
     await refresh();
   } catch (err) {
     toast({ icon: '⚠️', text: esc(err.message), tone: 'peach' });
+    await refresh(); // a refusal means this card is out of date; show what is true
   }
 }
 
@@ -410,7 +485,11 @@ export async function stopRunningTimer(id) {
   const session = type && supportsSides(type) ? readSession(timer) : null;
 
   try {
-    const extra = { userId: state.userId };
+    // No userId: the entry stays with whoever started the timer. Mom starts a
+    // feed and Dad's tablet stops it - it is still Mom's feed. Sending the
+    // stopper here made the server file it under them; reassigning it is what
+    // the Details sheet is for.
+    const extra = {};
     if (session) extra.data = finish(session);
     const { event } = await api.stopTimer(id, extra);
     if (session) clearSession(timer);
@@ -441,15 +520,24 @@ export async function cancelRunningTimer(id) {
  * The full editor for one entry - opened from "Details", from a history row,
  * or from the "+ more" button on a card (with `event` omitted for a new one).
  */
-export function openLogSheet({ event = null, typeId = null, presetId = null }) {
+export function openLogSheet({ event = null, typeId = null, presetId = null, draft = null }) {
   const cfg = config();
   const tid = event?.typeId || typeId;
   const type = typeOf(cfg, tid);
   const preset = (type.presets || []).find((p) => p.id === (event?.presetId ?? presetId));
   const data = event?.data || { ...defaultsFor(type), ...(preset?.data || {}) };
   const isNew = !event;
-  const chosenUser = event?.userId || state.userId;
-  const chosenBaby = event?.babyId || state.babyId;
+  // `draft` is the sheet's own half-finished state, handed back when it is
+  // reopened after the PIN pad (which, being a sheet itself, replaced it).
+  const shown = draft?.data ?? data;
+  const chosenUser = draft?.userId || event?.userId || state.userId;
+  const chosenBaby = draft?.babyId || event?.babyId || state.babyId;
+  const chosenAt = draft?.at ?? event?.at;
+  const chosenNote = draft?.note ?? event?.note ?? '';
+  // Choosing a PIN-protected person needs their PIN, as it does in the header.
+  // The entry's own person is exempt: putting an edit back the way it was is
+  // not logging anything new under their name.
+  const needsPin = (userId) => userId !== event?.userId && !isUnlocked(userId);
 
   const html = `
     <h3>${esc(type.emoji)} ${esc(isNew ? `Log ${type.label}` : `Edit ${type.label}`)}</h3>
@@ -461,7 +549,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
           <button type="button" class="btn sm" data-choose="userId" data-value="${esc(u.id)}"
             aria-pressed="${u.id === chosenUser}"
             style="${u.id === chosenUser ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">
-            ${esc(u.emoji)} ${esc(u.name)}
+            ${esc(u.emoji)} ${esc(u.name)}${needsPin(u.id) ? ' 🔒' : ''}
           </button>`).join('')}
       </div>
       <input type="hidden" data-meta="userId" value="${esc(chosenUser || '')}">
@@ -483,7 +571,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
 
     <label class="field">
       <span class="lab">When</span>
-      <input type="datetime-local" data-meta="at" value="${toLocalInput(event?.at)}">
+      <input type="datetime-local" data-meta="at" value="${toLocalInput(chosenAt)}">
       <div class="preset-row" style="margin-top:8px">
         <button type="button" class="btn sm" data-nudge="-15">−15m</button>
         <button type="button" class="btn sm" data-nudge="-5">−5m</button>
@@ -492,11 +580,11 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
       </div>
     </label>
 
-    <div data-fields>${fieldsHTML(type, data, cfg)}</div>
+    <div data-fields>${fieldsHTML(type, shown, cfg)}</div>
 
     <label class="field">
       <span class="lab">Note</span>
-      <textarea data-meta="note" placeholder="Anything worth remembering…">${esc(event?.note || '')}</textarea>
+      <textarea data-meta="note" placeholder="Anything worth remembering…">${esc(chosenNote)}</textarea>
     </label>
 
     <div class="sheet-actions">
@@ -512,6 +600,13 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
     // Chip groups that write into a hidden [data-meta] input.
     sheet.addEventListener('click', (ev) => {
       const choose = ev.target.closest('[data-choose]');
+      if (choose?.dataset.choose === 'userId' && needsPin(choose.dataset.value)) {
+        const wanted = choose.dataset.value;
+        const held = readDraft();
+        const reopen = (userId) => openLogSheet({ event, typeId, presetId, draft: { ...held, userId } });
+        whenUnlocked(wanted, () => reopen(wanted), () => reopen(held.userId));
+        return;
+      }
       if (choose && ['userId', 'babyId'].includes(choose.dataset.choose)) {
         const key = choose.dataset.choose;
         sheet.querySelector(`[data-meta="${key}"]`).value = choose.dataset.value;
@@ -535,7 +630,41 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
       }
     });
 
+    /**
+     * The data to save: what the sheet opened with - the entry's own, or the
+     * button's defaults and preset for a new one - with the fields on screen
+     * laid over it. See mergeFields for why it is not the form alone.
+     */
+    const savedData = () => {
+      const out = mergeFields(data, sheet.querySelector('[data-fields]'), cfg);
+      // `firstSide` outranks `side` when the next-side hint is worked out, and
+      // the merge now keeps it. A feed corrected by hand to one breast began on
+      // that breast, or the hint would go on alternating from the old one.
+      if (supportsSides(type) && out.side !== data.side && (out.side === 'Left' || out.side === 'Right')) {
+        out.firstSide = out.side;
+      }
+      return out;
+    };
+
+    /** Everything typed so far, to survive the sheet being replaced. */
+    function readDraft() {
+      return {
+        userId: sheet.querySelector('[data-meta="userId"]').value,
+        babyId: sheet.querySelector('[data-meta="babyId"]').value,
+        at: fromLocalInput(sheet.querySelector('[data-meta="at"]').value),
+        note: sheet.querySelector('[data-meta="note"]').value,
+        data: savedData(),
+      };
+    }
+
     sheet.querySelector('[data-save]').addEventListener('click', async () => {
+      const who = sheet.querySelector('[data-meta="userId"]').value;
+      // The chips already ask; this catches a new entry opened while the
+      // remembered profile is still a locked one.
+      if (needsPin(who)) {
+        const held = readDraft();
+        return whenUnlocked(who, () => openLogSheet({ event, typeId, presetId, draft: held }));
+      }
       const payload = {
         babyId: sheet.querySelector('[data-meta="babyId"]').value,
         userId: sheet.querySelector('[data-meta="userId"]').value,
@@ -543,7 +672,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
         presetId: event?.presetId ?? presetId ?? null,
         at: fromLocalInput(sheet.querySelector('[data-meta="at"]').value),
         note: sheet.querySelector('[data-meta="note"]').value.trim(),
-        data: collectFields(sheet.querySelector('[data-fields]'), cfg),
+        data: savedData(),
       };
       try {
         if (isNew) {
