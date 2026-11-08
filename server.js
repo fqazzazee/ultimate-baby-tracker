@@ -285,8 +285,22 @@ async function handleAPI(req, res, url) {
   if (resource === 'config' && method === 'PUT') {
     const body = await readBody(req);
     if (!body || typeof body !== 'object') return sendJSON(res, 400, { error: 'config object required' });
-    store.saveConfig(body);
-    return sendJSON(res, 200, { ok: true, config: store.publicConfig(), rev: store.getRevision() });
+    // The revision the client edited comes back inside the config it was
+    // given. One that is missing (an older page, a script) is not checked.
+    const expectRev = Number.isInteger(body.configRev) ? body.configRev : null;
+    try {
+      store.saveConfig(body, { expectRev });
+    } catch (err) {
+      if (!err.conflict) throw err;
+      // The current config rides along, so a client can show what is there now.
+      return sendJSON(res, 409, {
+        error: err.message, code: err.conflict, config: store.publicConfig(),
+        configRev: store.configRevision(), rev: store.getRevision(),
+      });
+    }
+    return sendJSON(res, 200, {
+      ok: true, config: store.publicConfig(), configRev: store.configRevision(), rev: store.getRevision(),
+    });
   }
 
   if (resource === 'events') {

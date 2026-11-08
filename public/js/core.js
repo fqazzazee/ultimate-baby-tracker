@@ -111,6 +111,17 @@ function applySettings() {
   applyTheme(s.theme || 'auto');
 }
 
+/*
+ * Config saves go out one at a time, in order. The copy each one edits carries
+ * the `configRev` it was built from, and the server refuses (409) a copy that
+ * is out of date - which a second quick change on this same phone would be,
+ * since it was cloned before the first one's answer arrived. `ownSaves` maps a
+ * revision this page sent to the one its save produced, so a change queued
+ * behind our own is brought forward; one made on another device is not.
+ */
+let configSaving = Promise.resolve();
+const ownSaves = new Map();
+
 /** Persist a config change. `mutate` receives a deep copy to edit in place. */
 export async function saveConfig(mutate) {
   const next = structuredClone(config());
@@ -118,11 +129,26 @@ export async function saveConfig(mutate) {
   state.data = { ...state.data, config: next }; // optimistic
   applySettings();
   render();
-  try {
-    await api.saveConfig(next);
-  } catch (err) {
-    toast({ icon: '⚠️', text: `Could not save: ${err.message}`, tone: 'peach' });
-  }
+  const send = async () => {
+    while (ownSaves.has(next.configRev)) next.configRev = ownSaves.get(next.configRev);
+    try {
+      const sent = next.configRev;
+      const res = await api.saveConfig(next);
+      if (Number.isInteger(sent) && Number.isInteger(res?.configRev)) ownSaves.set(sent, res.configRev);
+    } catch (err) {
+      if (err.status === 409) {
+        // Someone else saved Setup since this phone last loaded it. Writing
+        // ours anyway would undo theirs, and replaying it on top of theirs is
+        // not safe for every edit (some address a list by position), so the
+        // refresh below puts their version on screen and the person redoes it.
+        toast({ icon: '🔄', text: 'Setup was just changed on another device, so this change was <b>not saved</b>. The screen now shows the latest setup — please make your change again.', tone: 'peach', ms: 9000 });
+      } else {
+        toast({ icon: '⚠️', text: `Could not save: ${esc(err.message)}`, tone: 'peach' });
+      }
+    }
+  };
+  configSaving = configSaving.then(send);
+  await configSaving;
   return refresh();
 }
 
