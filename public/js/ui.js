@@ -315,6 +315,23 @@ export function collectFields(root, cfg = null) {
   return out;
 }
 
+/**
+ * An entry's data after an edit: what it held before, with every field the
+ * form rendered replaced by what the form now says.
+ *
+ * An entry carries more than its button's fields - every breastfeed stores
+ * `firstSide`, which the next-side hint reads - and an entry whose button has
+ * since been deleted renders no fields at all. Saving collectFields() alone
+ * dropped all of that. So only a key the form actually showed can change or
+ * disappear: cleared, or hidden by show-if (collectFields leaves those out,
+ * and the old value must not survive underneath).
+ */
+export function mergeFields(previous, root, cfg = null) {
+  const out = { ...(previous || {}) };
+  root.querySelectorAll('[data-field]').forEach((el) => { delete out[el.dataset.field]; });
+  return { ...out, ...collectFields(root, cfg) };
+}
+
 /** True when `el` sits inside a field applyShowIf() has hidden. */
 function hiddenByShowIf(el) {
   return el.closest('[data-showif].hidden') !== null;

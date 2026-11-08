@@ -10,7 +10,7 @@ import {
 } from './util.js';
 import { setCustomUnits } from './units.js';
 import {
-  typeOf, userOf, babyOf, toneStyle, fieldsHTML, collectFields, wireFieldControls,
+  typeOf, userOf, babyOf, toneStyle, fieldsHTML, mergeFields, wireFieldControls,
 } from './ui.js';
 import {
   supportsSides, startSession, readSession, writeSession, clearSession,
@@ -562,6 +562,22 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
       }
     });
 
+    /**
+     * The data to save: what the sheet opened with - the entry's own, or the
+     * button's defaults and preset for a new one - with the fields on screen
+     * laid over it. See mergeFields for why it is not the form alone.
+     */
+    const savedData = () => {
+      const out = mergeFields(data, sheet.querySelector('[data-fields]'), cfg);
+      // `firstSide` outranks `side` when the next-side hint is worked out, and
+      // the merge now keeps it. A feed corrected by hand to one breast began on
+      // that breast, or the hint would go on alternating from the old one.
+      if (supportsSides(type) && out.side !== data.side && (out.side === 'Left' || out.side === 'Right')) {
+        out.firstSide = out.side;
+      }
+      return out;
+    };
+
     sheet.querySelector('[data-save]').addEventListener('click', async () => {
       const payload = {
         babyId: sheet.querySelector('[data-meta="babyId"]').value,
@@ -570,7 +586,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null }) {
         presetId: event?.presetId ?? presetId ?? null,
         at: fromLocalInput(sheet.querySelector('[data-meta="at"]').value),
         note: sheet.querySelector('[data-meta="note"]').value.trim(),
-        data: collectFields(sheet.querySelector('[data-fields]'), cfg),
+        data: savedData(),
       };
       try {
         if (isNew) {
