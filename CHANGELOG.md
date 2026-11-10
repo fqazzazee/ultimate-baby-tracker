@@ -3,6 +3,15 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
+## 1.14.1 — 2026-11-10
+
+### Fixed
+
+- Choosing a person under **Who** when logging or editing an entry no longer
+  asks for their PIN, so a caregiver can reassign a feed or diaper to someone
+  whose PIN they don't know. The PIN is still asked before logging as a locked
+  profile you are switched to.
+
 ## 1.14.0 — 2026-11-08
 
 ### Added

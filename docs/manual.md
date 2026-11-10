@@ -434,8 +434,9 @@ is asked for before you can switch to that person, edit their profile, or start
 the app as them — so entries don't get logged under the wrong name. An unlock
 lasts until the browser tab is closed, and the 🔒 chip at the end of the
 people chips re-locks immediately — and moves you to someone without a lock,
-or asks for a PIN if everyone has one. Choosing a locked person under **Who**
-when logging or editing an entry asks for their PIN too.
+or asks for a PIN if everyone has one. Choosing someone under **Who** when
+logging or editing an entry never asks for a PIN, so anyone can hand a feed or
+diaper over to the person who actually did it.
 
 A timer is filed under whoever started it, whoever stops it; change the person
 in the entry afterwards if needed.
