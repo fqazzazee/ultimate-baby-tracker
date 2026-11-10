@@ -3,7 +3,7 @@
 Notable changes, newest first. Versions follow [semantic versioning](https://semver.org),
 and the version in `package.json` is what the header and the About card display.
 
-## Unreleased
+## 1.14.1 — 2026-11-10
 
 ### Fixed
 
