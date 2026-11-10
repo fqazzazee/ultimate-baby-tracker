@@ -534,10 +534,13 @@ export function openLogSheet({ event = null, typeId = null, presetId = null, dra
   const chosenBaby = draft?.babyId || event?.babyId || state.babyId;
   const chosenAt = draft?.at ?? event?.at;
   const chosenNote = draft?.note ?? event?.note ?? '';
-  // Choosing a PIN-protected person needs their PIN, as it does in the header.
-  // The entry's own person is exempt: putting an edit back the way it was is
-  // not logging anything new under their name.
-  const needsPin = (userId) => userId !== event?.userId && !isUnlocked(userId);
+  // The PIN guards against logging as the wrong *active* profile by accident,
+  // so it is only asked when the sheet would save under the remembered
+  // profile while that one is still locked (the boot PIN pad closes on
+  // Escape). Picking someone under Who is deliberate - a caregiver handing a
+  // feed or diaper over to the person who did it - and needs no PIN. The
+  // entry's own person is exempt too: putting an edit back is not new.
+  const needsPin = (userId) => userId === state.userId && userId !== event?.userId && !isUnlocked(userId);
 
   const html = `
     <h3>${esc(type.emoji)} ${esc(isNew ? `Log ${type.label}` : `Edit ${type.label}`)}</h3>
@@ -549,7 +552,7 @@ export function openLogSheet({ event = null, typeId = null, presetId = null, dra
           <button type="button" class="btn sm" data-choose="userId" data-value="${esc(u.id)}"
             aria-pressed="${u.id === chosenUser}"
             style="${u.id === chosenUser ? 'border-color:var(--pink);background:color-mix(in srgb,var(--pink) 22%,var(--surface-2))' : ''}">
-            ${esc(u.emoji)} ${esc(u.name)}${needsPin(u.id) ? ' 🔒' : ''}
+            ${esc(u.emoji)} ${esc(u.name)}
           </button>`).join('')}
       </div>
       <input type="hidden" data-meta="userId" value="${esc(chosenUser || '')}">
@@ -600,13 +603,6 @@ export function openLogSheet({ event = null, typeId = null, presetId = null, dra
     // Chip groups that write into a hidden [data-meta] input.
     sheet.addEventListener('click', (ev) => {
       const choose = ev.target.closest('[data-choose]');
-      if (choose?.dataset.choose === 'userId' && needsPin(choose.dataset.value)) {
-        const wanted = choose.dataset.value;
-        const held = readDraft();
-        const reopen = (userId) => openLogSheet({ event, typeId, presetId, draft: { ...held, userId } });
-        whenUnlocked(wanted, () => reopen(wanted), () => reopen(held.userId));
-        return;
-      }
       if (choose && ['userId', 'babyId'].includes(choose.dataset.choose)) {
         const key = choose.dataset.choose;
         sheet.querySelector(`[data-meta="${key}"]`).value = choose.dataset.value;
@@ -659,8 +655,8 @@ export function openLogSheet({ event = null, typeId = null, presetId = null, dra
 
     sheet.querySelector('[data-save]').addEventListener('click', async () => {
       const who = sheet.querySelector('[data-meta="userId"]').value;
-      // The chips already ask; this catches a new entry opened while the
-      // remembered profile is still a locked one.
+      // Catches a new entry opened while the remembered profile is still a
+      // locked one; a person chosen under Who goes through without a PIN.
       if (needsPin(who)) {
         const held = readDraft();
         return whenUnlocked(who, () => openLogSheet({ event, typeId, presetId, draft: held }));
